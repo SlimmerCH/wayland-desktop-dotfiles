@@ -8,7 +8,7 @@ import { Icon } from "../../../iconNames";
 
 function getCurrentWallpaper(connector?: string): string | null {
     try {
-        const output = exec("swww query")
+        const output = exec("awww query")
         const lines = output.split("\n").filter(l => l.includes("image: "))
         
         const line = connector 
@@ -18,8 +18,8 @@ function getCurrentWallpaper(connector?: string): string | null {
         const match = line?.match(/image:\s*(.+)$/)
         return match ? match[1].trim() : null
     } catch (error) {
-        execAsync("swww-daemon").catch(() => {})
-        console.log("swww daemon not running, starting...")
+        execAsync("awww-daemon").catch(() => {})
+        console.log("awww daemon not running, starting...")
     }
     return null
 }
@@ -44,7 +44,7 @@ function setupWallpaperPolling() {
         retryInterval = setInterval(() => {
             const path = getCurrentWallpaper()
             if (path) {
-                console.log("Successfully connected to swww daemon")
+                console.log("Successfully connected to awww daemon")
                 storeWallpaperPath(path)
                 clearInterval(retryInterval!)
                 retryInterval = null
@@ -211,7 +211,7 @@ function promptWallpaper() {
                 execAsync(`kiwi-settings auto-color "${cleanPath}"`)
             }
 
-            execAsync(`swww img "${cleanPath}" --transition-type wipe --transition-fps 120`)
+            execAsync(`awww img "${cleanPath}" --transition-type wipe --transition-fps 120`)
                 .then(() => {
                     storeWallpaperPath(cleanPath)
                 })

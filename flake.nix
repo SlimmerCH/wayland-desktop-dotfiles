@@ -106,7 +106,7 @@
           wrapProgram $out/bin/.${pname}-core \
             --prefix PATH : "${
               pkgs.lib.makeBinPath [
-                pkgs.swww
+                pkgs.awww
                 pkgs.hyprsunset
                 pkgs.brightnessctl
                 pkgs.zenity
@@ -174,7 +174,7 @@
           pkgs.ninja
           pkgs.gjs
           pkgs.brightnessctl
-          pkgs.swww
+          pkgs.awww
         ];
       };
 
