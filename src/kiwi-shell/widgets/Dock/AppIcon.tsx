@@ -8,7 +8,9 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     const application = GioUnix.DesktopAppInfo.new(entry)
     const icon = application?.get_string("Icon") ?? "application-x-executable"
     const name = application?.get_name() ?? entry.replace(/\.desktop$/, "")
-    const wmClass = entryToClass.get(entry) ?? entry.replace(/\.desktop$/, "").toLowerCase()
+    const wmClass = entryToClass.get(entry)
+        ?? application?.get_string("StartupWMClass")?.toLowerCase()
+        ?? entry.replace(/\.desktop$/, "").toLowerCase()
 
     const [pinned, setPinned] = createState(list().includes(entry))
     const [jumping, setJumping] = createState(false)

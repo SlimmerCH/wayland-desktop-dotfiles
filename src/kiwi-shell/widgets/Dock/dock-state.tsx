@@ -3,9 +3,24 @@ import { readFile, writeFileAsync } from "ags/file"
 import { conf } from "../config"
 import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
-import { classToEntry } from "../desktopEntries"
+import { classToEntry as _classToEntry, entryToClass as _entryToClass } from "../desktopEntries"
 
-export { classToEntry, entryToClass } from "../desktopEntries"
+// Apps where the actual Hyprland initial-class doesn't match StartupWMClass.
+// entry -> wmClass (for AppIcon dot tracking & focus)
+// wmClass -> entry (for unpinned list, best-effort — ambiguous when multiple electron apps run)
+const ELECTRON_OVERRIDES: [string, string][] = [
+    ["obsidian.desktop", "electron"],
+    // Add more as needed, e.g. ["cursor.desktop", "electron"]
+]
+
+export const entryToClass = new Map([..._entryToClass, ...ELECTRON_OVERRIDES])
+
+// For classToEntry we only add the override if the class isn't already mapped,
+// so a more specific mapping from desktopEntries always wins.
+export const classToEntry = new Map([
+    ...ELECTRON_OVERRIDES.map(([entry, cls]) => [cls, entry] as [string, string]),
+    ..._classToEntry, // desktopEntries wins on conflict
+])
 
 export const DOCK_HIDE_TIMEOUT = 600
 export const DOCK_HIDE_TIMEOUT_EDGE = 1200
