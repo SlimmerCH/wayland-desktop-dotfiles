@@ -16,6 +16,8 @@ const lengths = createComputed(get => [
     get(unpinnedList).length,
     get(conf).dock_home,
     get(conf).dock_trash,
+    get(conf).dock_icon_size,
+    get(conf).dock_margin
 ])
 
 export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
