@@ -1,23 +1,31 @@
 import { Gtk } from "ags/gtk4"
 import { createState, createComputed, createBinding, For } from "ags"
-import GioUnix from "gi://GioUnix"
 import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT } from "./dock-state"
 import { DockContextIcon } from "./dock-utils"
+import { iconForEntry, AppIconImage } from "../appIcon"
 
 export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v: boolean) => void }) {
-    const application = GioUnix.DesktopAppInfo.new(entry)
-    const icon = application?.get_string("Icon") ?? "application-x-executable"
+    const icon = iconForEntry(entry)
+    const application = (() => {
+        const GioUnix = imports.gi.GioUnix
+        return GioUnix.DesktopAppInfo.new(entry)
+    })()
     const name = application?.get_name() ?? entry.replace(/\.desktop$/, "")
-    const wmClass = entryToClass.get(entry)
-        ?? application?.get_string("StartupWMClass")?.toLowerCase()
-        ?? entry.replace(/\.desktop$/, "").toLowerCase()
+
+    const wmClasses = [
+        entryToClass.get(entry),
+        application?.get_string("StartupWMClass")?.toLowerCase(),
+        entry.replace(/\.desktop$/, "").toLowerCase(),
+    ].filter(Boolean) as string[]
 
     const [pinned, setPinned] = createState(list().includes(entry))
     const [jumping, setJumping] = createState(false)
 
     const clientsBinding = createComputed(get => {
         const allClients = get(createBinding(hyprland, "clients"))
-        return allClients.filter(client => client["initial-class"].toLowerCase() === wmClass)
+        return allClients.filter(client =>
+            wmClasses.includes(client["initial-class"].toLowerCase())
+        )
     })
 
     const onPinChange = (newPinned: boolean) => {
@@ -57,11 +65,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
             <box orientation={Gtk.Orientation.VERTICAL}>
                 {menu}
                 <overlay>
-                    <Gtk.Image
-                        iconName={icon}
-                        pixelSize={56}
-                        class="dock-app-icon"
-                    />
+                    <AppIconImage entry={entry} pixelSize={56} />
                     <box $type="overlay" class="dots-container" orientation={Gtk.Orientation.VERTICAL}>
                         <box vexpand={true}></box>
                         <box class="client-dots" halign={Gtk.Align.CENTER} spacing={3}>

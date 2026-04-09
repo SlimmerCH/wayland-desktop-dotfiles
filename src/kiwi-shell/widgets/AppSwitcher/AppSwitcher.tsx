@@ -2,12 +2,11 @@ import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createEffect, For, createBinding } from "ags"
 import Hyprland from "gi://AstalHyprland"
-import GioUnix from "gi://GioUnix"
 import { conf } from "../config"
 import { playSound } from "../sound"
 import { captureWindowToTexture } from "./clientCachingService"
-import { classToEntry } from "../desktopEntries"
 import { isValidClient } from "../Dock/dock-state"
+import { entryForClient, AppIconImage } from "../appIcon"
 
 export const [isVisible, setVisibility] = createState(false)
 export const [selectedAddress, setSelectedAddress] = createState<string | null>(null)
@@ -154,7 +153,7 @@ export function WindowPreview({ client }: { client: any }) {
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
             >
                 <box>
-                    <AppIcon client={client} />
+                    <AppIconImage entry={entryForClient(client)} pixelSize={24} cssClass="switcher-preview-icon" />
                     <label label={titleBinding} />
                 </box>
             </scrolledwindow>
@@ -187,20 +186,4 @@ export function WindowPreview({ client }: { client: any }) {
     })
 
     return container
-}
-
-export function AppIcon({ client }: { client: any }) {
-    if (!client) return null
-
-    const entry = classToEntry.get(client.get_class().toLowerCase())
-    const appInfo = entry ? GioUnix.DesktopAppInfo.new(entry) : null
-    const icon = appInfo?.get_icon()?.to_string() ?? "application-x-executable"
-
-    return (
-        <Gtk.Image
-            iconName={icon}
-            pixelSize={24}
-            class="switcher-preview-icon"
-        />
-    )
 }
