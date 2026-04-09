@@ -5,6 +5,11 @@
 .dock-bar {
     padding: 0 12px;
     padding-top: var(--dock-margin);
+    transition: transform 400ms;
+
+    &.slide-out {
+        transform: translateY(80px);
+    }
 }
 
 .dock-box {

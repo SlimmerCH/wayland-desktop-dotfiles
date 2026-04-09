@@ -5,6 +5,7 @@ import { conf } from "../config"
 import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE, JUMP_ANIMATION_CLASS_TIMEOUT } from "./dock-state"
 import { AppIcon } from "./AppIcon"
 import { HomeFolderButton, TrashButton } from "./DockButtons"
+import Cairo from "cairo"
 
 const clients = createBinding(hyprland, "clients")
 const activeWorkspace = createBinding(hyprland, "focusedWorkspace")
@@ -58,11 +59,11 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 `Dock theme-${conf.theme}`
             )}
             gdkmonitor={gdkmonitor}
+            visible={true}
             exclusivity={conf.as(conf =>
                 conf.dock == "auto-hide" ? Astal.Exclusivity.NORMAL : Astal.Exclusivity.EXCLUSIVE
             )}
             anchor={Astal.WindowAnchor.BOTTOM}
-            visible={showDock}
             application={app}
             layer={Astal.Layer.TOP}
             $={(self) => {
@@ -98,9 +99,18 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     }, DOCK_HIDE_TIMEOUT)
                 })
                 self.add_controller(dragMotion)
+                showDock.subscribe(visible => {
+                    const surface = self.get_surface()
+                    if (!surface) return
+                    if (showDock()) {
+                        surface.set_input_region(null)          // normal input
+                    } else {
+                        surface.set_input_region(new Cairo.Region()) // fully transparent to input
+                    }
+                })
             }}
         >
-            <DockBar setMenuOpen={setMenuOpen} />
+            <DockBar setMenuOpen={setMenuOpen} showDock={showDock} />
         </window>
     ), <EdgeSensor gdkmonitor={gdkmonitor} hideTimeout={hideTimeout} setDockTrigger={setDockTrigger} />]
 }
@@ -152,11 +162,19 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
     )
 }
 
-function DockBar({ setMenuOpen }: { setMenuOpen: (v: boolean) => void }) {
+function DockBar({ setMenuOpen, showDock }: {
+    setMenuOpen: (v: boolean) => void,
+    showDock: ReturnType<typeof createComputed<boolean>>
+}) {
     const pinnedBinding = createComputed(get => get(list))
 
     return (
-        <box class="dock-bar" halign={Gtk.Align.CENTER}>
+        <box
+            class={createComputed(get =>
+                `dock-bar${get(showDock) ? "" : " slide-out"}`
+            )}
+            halign={Gtk.Align.CENTER}
+        >
             <box $type="center" class="dock-box" orientation={Gtk.Orientation.HORIZONTAL}>
                 <box>
                     <For each={pinnedBinding}>
