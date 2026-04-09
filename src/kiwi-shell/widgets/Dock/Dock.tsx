@@ -103,9 +103,9 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     const surface = self.get_surface()
                     if (!surface) return
                     if (showDock()) {
-                        surface.set_input_region(null)          // normal input
+                        surface.set_input_region(null)
                     } else {
-                        surface.set_input_region(new Cairo.Region()) // fully transparent to input
+                        surface.set_input_region(new Cairo.Region())
                     }
                 })
             }}

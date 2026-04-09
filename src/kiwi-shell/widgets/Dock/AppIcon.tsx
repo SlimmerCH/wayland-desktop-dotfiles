@@ -3,6 +3,7 @@ import { createState, createComputed, createBinding, For } from "ags"
 import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT } from "./dock-state"
 import { DockContextIcon } from "./dock-utils"
 import { iconForEntry, AppIconImage } from "../appIcon"
+import { conf } from "../config"
 
 export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v: boolean) => void }) {
     const icon = iconForEntry(entry)
@@ -65,7 +66,9 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
             <box orientation={Gtk.Orientation.VERTICAL}>
                 {menu}
                 <overlay>
-                    <AppIconImage entry={entry} pixelSize={56} />
+                    <AppIconImage entry={entry} pixelSize={
+                        conf.as(conf => conf.dock_icon_size)
+                    } />
                     <box $type="overlay" class="dots-container" orientation={Gtk.Orientation.VERTICAL}>
                         <box vexpand={true}></box>
                         <box class="client-dots" halign={Gtk.Align.CENTER} spacing={3}>

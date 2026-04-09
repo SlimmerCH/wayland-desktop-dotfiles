@@ -6,5 +6,6 @@
   "dock": "default",
   "dock_home": true,
   "dock_trash": true,
-  "auto_color": false
+  "auto_color": false,
+  "dock_icon_size": 54
 }

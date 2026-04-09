@@ -71,7 +71,7 @@ export function HomeFolderButton({ setMenuOpen }: { setMenuOpen: (v: boolean) =>
                 {menu}
                 <Gtk.Image
                     iconName="user-home"
-                    pixelSize={56}
+                    pixelSize={conf.as(conf => conf.dock_icon_size)}
                     class="dock-app-icon"
                 />
             </box>
@@ -195,7 +195,7 @@ export function TrashButton({ setMenuOpen }: { setMenuOpen: (v: boolean) => void
                 {menu}
                 <Gtk.Image
                     iconName={trashEmpty.as(empty => empty ? "user-trash" : "user-trash-full")}
-                    pixelSize={56}
+                    pixelSize={conf.as(conf => conf.dock_icon_size)}
                     class="dock-app-icon"
                 />
             </box>

@@ -1,6 +1,7 @@
 import { Gtk } from "ags/gtk4"
 import GioUnix from "gi://GioUnix"
 import { classToEntry } from "./desktopEntries"
+import { Binding } from "ags";
 
 export function entryForClient(client: any): string {
     const cls = client.get_class()
@@ -18,7 +19,7 @@ export function iconForEntry(entry: string): string {
 
 export function AppIconImage({ entry, pixelSize = 56, cssClass = "dock-app-icon" }: {
     entry: string
-    pixelSize?: number
+    pixelSize?: number | Binding<number>
     cssClass?: string
 }) {
     return (
