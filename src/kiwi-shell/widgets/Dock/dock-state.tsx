@@ -22,8 +22,8 @@ export const classToEntry = new Map([
     ..._classToEntry, // desktopEntries wins on conflict
 ])
 
-export const DOCK_HIDE_TIMEOUT = 600
-export const DOCK_HIDE_TIMEOUT_EDGE = 1200
+export const DOCK_HIDE_TIMEOUT = 300
+export const DOCK_HIDE_TIMEOUT_EDGE = 600
 export const JUMP_ANIMATION_CLASS_TIMEOUT = 500
 
 export const hyprland = Hyprland.get_default()
