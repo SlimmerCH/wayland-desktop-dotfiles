@@ -6,9 +6,17 @@ import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE
 import { AppIcon } from "./AppIcon"
 import { HomeFolderButton, TrashButton } from "./DockButtons"
 import Cairo from "cairo"
+import GLib from "gi://GLib"
 
 const clients = createBinding(hyprland, "clients")
 const activeWorkspace = createBinding(hyprland, "focusedWorkspace")
+
+const lengths = createComputed(get => [
+    get(list).length,
+    get(unpinnedList).length,
+    get(conf).dock_home,
+    get(conf).dock_trash,
+])
 
 export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const [dockTrigger, setDockTrigger] = createState(false)
@@ -31,7 +39,6 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         if (mode != "auto-hide") return true
         if (trigger || hovered || hasMenu) return true
 
-        // Subscribe so this recomputes on every workspace switch
         get(activeWorkspace)
 
         const activeId = hyprland.get_monitors()
@@ -68,6 +75,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             layer={Astal.Layer.TOP}
             $={(self) => {
                 onCleanup(() => self.destroy())
+
                 const motionController = new Gtk.EventControllerMotion()
                 motionController.connect("enter", () => {
                     if (leaveTimeout) {
@@ -99,6 +107,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     }, DOCK_HIDE_TIMEOUT)
                 })
                 self.add_controller(dragMotion)
+
                 showDock.subscribe(visible => {
                     const surface = self.get_surface()
                     if (!surface) return
@@ -107,6 +116,15 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     } else {
                         surface.set_input_region(new Cairo.Region())
                     }
+                })
+
+                lengths()
+                lengths.subscribe(() => {
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        self.set_default_size(-1, -1)
+                        self.queue_resize()
+                        return GLib.SOURCE_REMOVE
+                    })
                 })
             }}
         >
