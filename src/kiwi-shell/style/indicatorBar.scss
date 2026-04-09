@@ -1,3 +1,7 @@
+.IndicatorBar {
+    margin-bottom: 20px;
+}
+
 .indicator-bar {
     transition: opacity 1s ease-out;
     .indicator-icon {
@@ -8,7 +12,6 @@
         padding: 12px 15px;
         border-radius: 10px;
     }
-    margin-bottom: 20px;
     scale {
         min-width: 120px;
         trough {

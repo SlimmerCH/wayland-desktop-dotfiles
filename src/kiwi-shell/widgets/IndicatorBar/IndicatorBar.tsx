@@ -111,7 +111,7 @@ export default function IndicatorBar({  gdkmonitor }: { gdkmonitor: Gdk.Monitor 
       gdkmonitor={gdkmonitor}
       exclusivity={Astal.Exclusivity.NORMAL}
       anchor={
-        Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT
+        Astal.WindowAnchor.BOTTOM
       }
       application={app}
       layer={Astal.Layer.TOP}
@@ -136,8 +136,8 @@ function indicatorChange(value: number) {
 
 function Indicator(){
   return (
-    <centerbox class="indicator-bar">
-      <box $type="center" class="indicator-box">
+    <box class="indicator-bar">
+      <box class="indicator-box">
         <Icon
           class={indicatorIcon.as((icon) => 'indicator-icon '+icon)}
           iconName={indicatorIcon}
@@ -157,7 +157,7 @@ function Indicator(){
         sensitive={isSensitive}
       />
       </box>
-    </centerbox>
+    </box>
   )
 }
 
