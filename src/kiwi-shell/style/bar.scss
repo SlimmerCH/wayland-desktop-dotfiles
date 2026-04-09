@@ -3,7 +3,7 @@ window.Bar {
   color: #fff;
   font-family: 'Quicksand';
 
-  > .centerbox {
+  > box {
     margin: 4px;
     margin-bottom: var(--bar-margin);
   }

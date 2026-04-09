@@ -25,8 +25,8 @@
         
         .tile {
             transition: background-color 100ms ease-out;
-            min-width: 0;
-            min-height: 0;
+            min-width: 0px;
+            min-height: 6px;
             margin: 13px 0;
             background-color: #5f5f5f;
             border-radius: 13px;
