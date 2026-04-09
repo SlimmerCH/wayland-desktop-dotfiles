@@ -2,6 +2,9 @@ import app from "ags/gtk4/app"
 import style from "./style.scss"
 import Bar from "./widgets/Bar/Bar"
 import IndicatorBar from "./widgets/IndicatorBar/IndicatorBar"
+import AppSwitcher, {
+  toggleAppSwitcher,
+} from "./widgets/AppSwitcher/AppSwitcher"
 import Dock from "./widgets/Dock/Dock"
 import { execAsync } from "ags/process"
 import Prompt from "./widgets/prompts"
@@ -52,6 +55,7 @@ app.start({
             <Dock gdkmonitor={gdkmonitor} />
             <NotificationCenter gdkmonitor={gdkmonitor} />
             {index() === 0 && <IndicatorBar gdkmonitor={gdkmonitor} />}
+            {index() === 0 && <AppSwitcher gdkmonitor={gdkmonitor} />}
             {index() === 0 && <Prompt gdkmonitor={gdkmonitor} />}
           </This>
         )}
