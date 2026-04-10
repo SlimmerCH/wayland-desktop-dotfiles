@@ -25,6 +25,7 @@ const lengths = createComputed(get => [
 
 // Delay between each icon in the left-to-right cascade on shell launch.
 const STAGGER_MS = 40
+const CASCADE_DELAY_MS = 100
 
 const dockBarRoots = new Set<Gtk.Widget>()
 
@@ -51,7 +52,7 @@ export function cascadeDockIcons(scope?: Gtk.Widget) {
 
         icons.forEach(w => w.remove_css_class("fade-in"))
         icons.forEach((w, i) => {
-            setTimeout(() => w.add_css_class("fade-in"), i * STAGGER_MS)
+            setTimeout(() => w.add_css_class("fade-in"), i * STAGGER_MS + CASCADE_DELAY_MS)
         })
     }
 }
