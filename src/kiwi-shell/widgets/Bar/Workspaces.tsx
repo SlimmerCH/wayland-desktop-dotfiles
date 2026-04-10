@@ -70,20 +70,22 @@ export default function Workspaces() {
   })
   
   return (
-    <box class="workspaces">
-      {buttons}
-      <revealer
-        transitionType={Gtk.RevealerTransitionType.SLIDE_LEFT}
-        revealChild={recordersBinding.as(a => !(a.length === 0))}
-      >
-        <Gtk.Image
-          class="mic-access"
-          iconName={micMutedBinding.as(b =>
-            b ? "audio-input-microphone-muted-symbolic" : "audio-input-microphone-symbolic"
-          )}
-          pixelSize={13}
-        />
-      </revealer>
-    </box>
+    <centerbox class="workspaces-container">
+      <box $type="center" class="workspaces">
+        {buttons}
+        <revealer
+          transitionType={Gtk.RevealerTransitionType.SLIDE_LEFT}
+          revealChild={recordersBinding.as(a => !(a.length === 0))}
+        >
+          <Gtk.Image
+            class="mic-access"
+            iconName={micMutedBinding.as(b =>
+              b ? "audio-input-microphone-muted-symbolic" : "audio-input-microphone-symbolic"
+            )}
+            pixelSize={13}
+          />
+        </revealer>
+      </box>
+    </centerbox>
   )
 }

@@ -1,42 +1,49 @@
 import AstalTray from "gi://AstalTray"
 import { createBinding, For } from "ags"
 import Gtk from "gi://Gtk?version=4.0"
+import GLib from "gi://GLib?version=2.0"
 import { exec } from "ags/process"
-import Gio from "gi://Gio?version=2.0"
 
 const tray = AstalTray.get_default()
 const trayItems = createBinding(tray, 'items')
 
-export default function Tray(){
+export default function Tray() {
     return (
-        <box class="Tray" spacing={0}
-        visible={trayItems.as(items => {
-            return items.length != 0
-        }
-            
-        )}
+        <box
+            class="Tray"
+            spacing={0}
+            visible={trayItems.as(items => items.length !== 0)}
+            $={(self) => {
+                const unsub = trayItems.subscribe(() => {
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        const win = self.get_root()
+                        if (win instanceof Gtk.Window) {
+                            win.set_default_size(-1, -1)
+                            win.queue_resize()
+                        }
+                        return GLib.SOURCE_REMOVE
+                    })
+                })
+                self.connect("destroy", unsub)
+            }}
         >
             <For each={trayItems}>
-            {item => 
-                
-                <menubutton
-                    class="tray-item"
-                >
-                    <TrayIcon item={item} />
-                    <Gtk.PopoverMenu
-                        menuModel={item.get_menu_model()}
-                        onRealize={(self) => {
-                            // Insert the action group with the "dbusmenu" prefix
-                            const actionGroup = item.get_action_group()
-                            if (actionGroup) {
-                                self.insert_action_group("dbusmenu", actionGroup)
-                            }
-                        }}
-                        hasArrow={true}
-                        class="tray-menu"
-                    />
-                </menubutton>
-            }
+                {item =>
+                    <menubutton class="tray-item">
+                        <TrayIcon item={item} />
+                        <Gtk.PopoverMenu
+                            menuModel={item.get_menu_model()}
+                            onRealize={(self) => {
+                                const actionGroup = item.get_action_group()
+                                if (actionGroup) {
+                                    self.insert_action_group("dbusmenu", actionGroup)
+                                }
+                            }}
+                            hasArrow={true}
+                            class="tray-menu"
+                        />
+                    </menubutton>
+                }
             </For>
         </box>
     )
