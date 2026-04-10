@@ -160,6 +160,10 @@
 
 $jumptime: var(--jumptime);
 
+.app-icon-container {
+    transform: translateY(80px)
+}
+
 .jumping {
     animation: dock-jump $jumptime forwards;
 }
@@ -169,6 +173,7 @@ $jumptime: var(--jumptime);
     animation-delay: 100ms;
 }
 
-.app-icon-container {
-    transform: translateY(80px)
+.shown {
+    transform: translateY(0); opacity: 1;
 }
+

@@ -7,12 +7,14 @@ export function KeyedList<T>({
     children,
     enterClass,
     shouldEnter,
+    appendOnly,
 }: {
     each: ReturnType<typeof createComputed<T[]>>
     keyFn: (item: T) => string
     children: (item: T) => Gtk.Widget
     enterClass?: string
     shouldEnter?: (item: T) => boolean
+    appendOnly?: boolean
 }) {
     return (
         <box
@@ -49,21 +51,31 @@ export function KeyedList<T>({
                                 widgetMap.set(k, w)
                                 disposeMap.set(k, dispose)
                                 self.append(w)
-                                if (enterClass && initialized) {
-                                    const animate = shouldEnter ? shouldEnter(item) : true
-                                    if (animate) w.add_css_class(enterClass)
+                                if (initialized) {
+                                    // Always mark as shown so items that switch lists
+                                    // (pin/unpin) are visible without waiting for animation.
+                                    w.add_css_class("shown")
+                                    if (enterClass) {
+                                        const animate = shouldEnter ? shouldEnter(item) : true
+                                        if (animate) w.add_css_class(enterClass)
+                                    }
                                 }
                             })
                         }
                     }
 
-                    // 3. Reorder forward to match array order without touching widget state
-                    let prev: Gtk.Widget | null = null
-                    for (let i = 0; i < nextKeys.length; i++) {
-                        const w = widgetMap.get(nextKeys[i])
-                        if (!w) continue
-                        self.reorder_child_after(w, prev)
-                        prev = w
+                    // 3. Reorder forward to match array order without touching widget state.
+                    //    Skipped when appendOnly is set — new widgets are always appended at
+                    //    the end so existing widgets are never shuffled (which would restart
+                    //    their CSS animations).
+                    if (!appendOnly) {
+                        let prev: Gtk.Widget | null = null
+                        for (let i = 0; i < nextKeys.length; i++) {
+                            const w = widgetMap.get(nextKeys[i])
+                            if (!w) continue
+                            self.reorder_child_after(w, prev)
+                            prev = w
+                        }
                     }
 
                     prevKeys = nextKeys
@@ -72,7 +84,6 @@ export function KeyedList<T>({
 
                 sync(each.get() ?? [])
 
-                // AGS computed subscribe fires a plain notification — pull via .get()
                 const unsub = each.subscribe(() => sync(each.get() ?? []))
 
                 onCleanup(() => {
