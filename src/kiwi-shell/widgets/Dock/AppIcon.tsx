@@ -42,44 +42,46 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     const menu = AppContextMenu(entry, clientsBinding, application, icon, name, pinned, onPinChange, setMenuOpen)
 
     return (
-        <button
-            onclicked={() => {
-                const client = clientsBinding()[0]
-                if (client) {
-                    client.focus()
-                } else {
-                    setJumping(true)
-                    setTimeout(() => setJumping(false), JUMP_ANIMATION_CLASS_TIMEOUT + 100)
-                    application.launch([], null)
-                }
-            }}
-            $={(self) => {
-                const gesture = new Gtk.GestureClick()
-                gesture.set_button(3)
-                gesture.connect("released", () => {
-                    menu.popup()
-                })
-                self.add_controller(gesture)
-            }}
-            class={jumping.as(isJumping => isJumping ? "app-launch-button jumping" : "app-launch-button")}
-        >
-            <box orientation={Gtk.Orientation.VERTICAL}>
-                {menu}
-                <overlay>
-                    <AppIconImage entry={entry} pixelSize={
-                        conf.as(conf => conf.dock_icon_size)
-                    } />
-                    <box $type="overlay" class="dots-container" orientation={Gtk.Orientation.VERTICAL}>
-                        <box vexpand={true}></box>
-                        <box class="client-dots" halign={Gtk.Align.CENTER} spacing={3}>
-                            <For each={clientsBinding}>
-                                {(_client) => <ActiveClientDot />}
-                            </For>
+        <box class="app-icon-container">
+            <button
+                onclicked={() => {
+                    const client = clientsBinding()[0]
+                    if (client) {
+                        client.focus()
+                    } else {
+                        setJumping(true)
+                        setTimeout(() => setJumping(false), JUMP_ANIMATION_CLASS_TIMEOUT + 100)
+                        application.launch([], null)
+                    }
+                }}
+                $={(self) => {
+                    const gesture = new Gtk.GestureClick()
+                    gesture.set_button(3)
+                    gesture.connect("released", () => {
+                        menu.popup()
+                    })
+                    self.add_controller(gesture)
+                }}
+                class={jumping.as(isJumping => isJumping ? "app-launch-button jumping" : "app-launch-button")}
+            >
+                <box orientation={Gtk.Orientation.VERTICAL}>
+                    {menu}
+                    <overlay>
+                        <AppIconImage entry={entry} pixelSize={
+                            conf.as(conf => conf.dock_icon_size)
+                        } />
+                        <box $type="overlay" class="dots-container" orientation={Gtk.Orientation.VERTICAL}>
+                            <box vexpand={true}></box>
+                            <box class="client-dots" halign={Gtk.Align.CENTER} spacing={3}>
+                                <For each={clientsBinding}>
+                                    {(_client) => <ActiveClientDot />}
+                                </For>
+                            </box>
                         </box>
-                    </box>
-                </overlay>
-            </box>
-        </button>
+                    </overlay>
+                </box>
+            </button>
+        </box>
     )
 }
 

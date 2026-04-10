@@ -6,10 +6,12 @@
     padding: 0 12px;
     padding-top: var(--dock-margin);
     transition: transform 400ms;
+    //animation: icon-slide 400ms ease-out forwards;
 
     &.slide-out {
         transform: translateY(80px);
     }
+
 }
 
 .dock-box {
@@ -107,14 +109,17 @@
     margin-top: 0;
     margin-bottom: 4px;
     padding-top: 4px;
-
 }
 
 .dock-spacer {
-    border-right: 1px rgba(255, 255, 255, 0.1) solid;
-    margin-right: 4px;
-    padding-right: 4px;
+    border-right: 1px rgba(255, 255, 255, 0.05) solid;
+    margin-right: 6px;
+    padding-right: 6px;
+    animation: emerge 600ms ease-out;
+    margin-top: 10px;
+    margin-bottom: 10px;
 }
+
 
 .edge-sensor-bottom {
     background: rgba(0, 0, 0, 0.01);
@@ -133,8 +138,28 @@
     100% { transform: translateY(0); }
 }
 
+@keyframes icon-slide {
+    0%   { transform: translateY(80px); opacity: 0.5;}
+    80%  { transform: translateY(-3px); }
+    95%  { transform: translateY(1px); }
+    100% { transform: translateY(0); opacity: 1;}
+}
+
+@keyframes emerge {
+    0%   { transform: scaleY(0); opacity: 0.5;}
+    100% { transform: scaleY(1); opacity: 1;}
+}
+
 $jumptime: var(--jumptime);
 
 .jumping {
     animation: dock-jump $jumptime forwards;
+}
+
+.fade-in {
+    animation: icon-slide 400ms ease-out forwards;
+}
+
+.app-icon-container {
+    transform: translateY(80px)
 }

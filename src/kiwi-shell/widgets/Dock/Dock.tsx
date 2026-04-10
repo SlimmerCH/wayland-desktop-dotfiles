@@ -1,10 +1,11 @@
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
-import { createState, createComputed, createBinding, For, onCleanup } from "ags"
+import { createState, createComputed, createBinding, onCleanup } from "ags"
 import { conf } from "../config"
 import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE, JUMP_ANIMATION_CLASS_TIMEOUT } from "./dock-state"
 import { AppIcon } from "./AppIcon"
 import { HomeFolderButton, TrashButton } from "./DockButtons"
+import { KeyedList } from "./KeyedList"
 import Cairo from "cairo"
 import GLib from "gi://GLib"
 
@@ -19,6 +20,43 @@ const lengths = createComputed(get => [
     get(conf).dock_icon_size,
     get(conf).dock_margin
 ])
+
+// ─── Cascade animation ────────────────────────────────────────────────────────
+
+// Delay between each icon in the left-to-right cascade on shell launch.
+const STAGGER_MS = 100
+
+let dockBarRoot: Gtk.Widget | null = null
+
+export function cascadeDockIcons() {
+    if (!dockBarRoot) return
+
+    const icons: Gtk.Widget[] = []
+
+    const walk = (widget: Gtk.Widget) => {
+        if (!widget.get_visible()) return
+        if (widget.has_css_class("app-icon-container")) {
+            icons.push(widget)
+            return
+        }
+        let child = (widget as any).get_first_child?.()
+        while (child) {
+            walk(child)
+            child = child.get_next_sibling?.()
+        }
+    }
+    walk(dockBarRoot)
+    if (icons.length === 0) return
+
+    // Strip any leftover fade-in classes so replaying works cleanly,
+    // then apply fade-in to each icon via a staggered JS timer.
+    icons.forEach(w => w.remove_css_class("fade-in"))
+    icons.forEach((w, i) => {
+        setTimeout(() => w.add_css_class("fade-in"), i * STAGGER_MS)
+    })
+}
+
+// ─── Dock ─────────────────────────────────────────────────────────────────────
 
 export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const [dockTrigger, setDockTrigger] = createState(false)
@@ -64,9 +102,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 `
             )}
             name="ags-dock"
-            class={conf.as(conf =>
-                `Dock theme-${conf.theme}`
-            )}
+            class={conf.as(conf => `Dock theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
             visible={true}
             exclusivity={conf.as(conf =>
@@ -80,10 +116,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
 
                 const motionController = new Gtk.EventControllerMotion()
                 motionController.connect("enter", () => {
-                    if (leaveTimeout) {
-                        clearTimeout(leaveTimeout)
-                        leaveTimeout = null
-                    }
+                    if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
                     setDockHovered(true)
                 })
                 motionController.connect("leave", () => {
@@ -96,10 +129,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
 
                 const dragMotion = new Gtk.DropControllerMotion()
                 dragMotion.connect("enter", () => {
-                    if (leaveTimeout) {
-                        clearTimeout(leaveTimeout)
-                        leaveTimeout = null
-                    }
+                    if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
                     setDockHovered(true)
                 })
                 dragMotion.connect("leave", () => {
@@ -110,7 +140,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 })
                 self.add_controller(dragMotion)
 
-                showDock.subscribe(visible => {
+                showDock.subscribe(() => {
                     const surface = self.get_surface()
                     if (!surface) return
                     if (showDock()) {
@@ -135,6 +165,8 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     ), <EdgeSensor gdkmonitor={gdkmonitor} hideTimeout={hideTimeout} setDockTrigger={setDockTrigger} />]
 }
 
+// ─── EdgeSensor ───────────────────────────────────────────────────────────────
+
 function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: Gdk.Monitor }) {
     return (
         <window
@@ -150,10 +182,7 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
                 onCleanup(() => self.destroy())
                 const motionController = new Gtk.EventControllerMotion()
                 motionController.connect("enter", () => {
-                    if (hideTimeout) {
-                        clearTimeout(hideTimeout)
-                        hideTimeout = null
-                    }
+                    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null }
                     setDockTrigger(true)
                     hideTimeout = setTimeout(() => {
                         setDockTrigger(false)
@@ -164,10 +193,7 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
 
                 const dragMotion = new Gtk.DropControllerMotion()
                 dragMotion.connect("enter", () => {
-                    if (hideTimeout) {
-                        clearTimeout(hideTimeout)
-                        hideTimeout = null
-                    }
+                    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null }
                     setDockTrigger(true)
                     hideTimeout = setTimeout(() => {
                         setDockTrigger(false)
@@ -182,24 +208,42 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
     )
 }
 
+// ─── DockBar ──────────────────────────────────────────────────────────────────
+
 function DockBar({ setMenuOpen, showDock }: {
     setMenuOpen: (v: boolean) => void,
     showDock: ReturnType<typeof createComputed<boolean>>
 }) {
     const pinnedBinding = createComputed(get => get(list))
+    const unpinnedBinding = createComputed(get => get(unpinnedList))
+
+    let prevPinnedSnapshot = new Set(list())
+    pinnedBinding.subscribe(() => {
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            prevPinnedSnapshot = new Set(list())
+            return GLib.SOURCE_REMOVE
+        })
+    })
 
     return (
         <box
-            class={createComputed(get =>
-                `dock-bar${get(showDock) ? "" : " slide-out"}`
-            )}
+            class={createComputed(get => `dock-bar${get(showDock) ? "" : " slide-out"}`)}
             halign={Gtk.Align.CENTER}
+            $={(self: Gtk.Widget) => {
+                dockBarRoot = self
+                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                    cascadeDockIcons()
+                    return GLib.SOURCE_REMOVE
+                })
+            }}
         >
             <box $type="center" class="dock-box" orientation={Gtk.Orientation.HORIZONTAL}>
                 <box>
-                    <For each={pinnedBinding}>
-                        {(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
-                    </For>
+                    <KeyedList
+                        each={pinnedBinding}
+                        keyFn={(entry) => entry}
+                        children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                    />
                 </box>
                 <box
                     vexpand={true}
@@ -209,9 +253,13 @@ function DockBar({ setMenuOpen, showDock }: {
                     )}
                 />
                 <box>
-                    <For each={unpinnedList}>
-                        {(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
-                    </For>
+                    <KeyedList
+                        each={unpinnedBinding}
+                        keyFn={(entry) => entry}
+                        enterClass="fade-in"
+                        shouldEnter={(entry) => !prevPinnedSnapshot.has(entry)}
+                        children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                    />
                 </box>
                 <box
                     vexpand={true}
