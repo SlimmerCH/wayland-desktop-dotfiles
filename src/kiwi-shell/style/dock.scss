@@ -2,14 +2,16 @@
     padding-top: 2px;
 }
 
+.dock-bar-container {
+    animation: dock-activate 400ms ease forwards;
+    animation-delay: 60ms;
+    transform: scaleX(0);
+}
+
 .dock-bar {
     padding: 0 12px;
     padding-top: var(--dock-margin);
     transition: transform 400ms;
-
-    transform: scaleX(0);
-    animation: dock-activate 400ms ease forwards;
-    animation-delay: 60ms;
 
     &.slide-out {
         transform: translateY(80px);

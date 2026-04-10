@@ -227,53 +227,55 @@ function DockBar({ setMenuOpen, showDock }: {
     })
 
     return (
-        <box
-            class={createComputed(get => `dock-bar${get(showDock) ? "" : " slide-out"}`)}
-            halign={Gtk.Align.CENTER}
-            $={(self: Gtk.Widget) => {
-                dockBarRoots.add(self)
-                onCleanup(() => dockBarRoots.delete(self))
-                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                    cascadeDockIcons(self)
-                    return GLib.SOURCE_REMOVE
-                })
-            }}
-        >
-            <box $type="center" class="dock-box" orientation={Gtk.Orientation.HORIZONTAL}>
-                <box>
-                    <KeyedList
-                        each={pinnedBinding}
-                        keyFn={(entry) => entry}
-                        children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+        <box class="dock-bar-container">
+            <box
+                class={createComputed(get => `dock-bar${get(showDock) ? "" : " slide-out"}`)}
+                halign={Gtk.Align.CENTER}
+                $={(self: Gtk.Widget) => {
+                    dockBarRoots.add(self)
+                    onCleanup(() => dockBarRoots.delete(self))
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        cascadeDockIcons(self)
+                        return GLib.SOURCE_REMOVE
+                    })
+                }}
+            >
+                <box $type="center" class="dock-box" orientation={Gtk.Orientation.HORIZONTAL}>
+                    <box>
+                        <KeyedList
+                            each={pinnedBinding}
+                            keyFn={(entry) => entry}
+                            children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                        />
+                    </box>
+                    <box
+                        vexpand={true}
+                        class="dock-spacer"
+                        visible={createComputed(get =>
+                            get(list).length > 0 && get(unpinnedList).length > 0
+                        )}
                     />
-                </box>
-                <box
-                    vexpand={true}
-                    class="dock-spacer"
-                    visible={createComputed(get =>
-                        get(list).length > 0 && get(unpinnedList).length > 0
-                    )}
-                />
-                <box>
-                    <KeyedList
-                        each={unpinnedBinding}
-                        keyFn={(entry) => entry}
-                        enterClass="fade-in"
-                        shouldEnter={(entry) => !prevPinnedSnapshot.has(entry)}
-                        children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
-                        appendOnly
+                    <box>
+                        <KeyedList
+                            each={unpinnedBinding}
+                            keyFn={(entry) => entry}
+                            enterClass="fade-in"
+                            shouldEnter={(entry) => !prevPinnedSnapshot.has(entry)}
+                            children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                            appendOnly
+                        />
+                    </box>
+                    <box
+                        vexpand={true}
+                        class="dock-spacer"
+                        visible={createComputed(get =>
+                            (get(list).length > 0 || get(unpinnedList).length > 0) &&
+                            (get(conf).dock_home == true || get(conf).dock_trash == true)
+                        )}
                     />
+                    <HomeFolderButton setMenuOpen={setMenuOpen} />
+                    <TrashButton setMenuOpen={setMenuOpen} />
                 </box>
-                <box
-                    vexpand={true}
-                    class="dock-spacer"
-                    visible={createComputed(get =>
-                        (get(list).length > 0 || get(unpinnedList).length > 0) &&
-                        (get(conf).dock_home == true || get(conf).dock_trash == true)
-                    )}
-                />
-                <HomeFolderButton setMenuOpen={setMenuOpen} />
-                <TrashButton setMenuOpen={setMenuOpen} />
             </box>
         </box>
     )
