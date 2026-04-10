@@ -24,7 +24,7 @@ const lengths = createComputed(get => [
 // ─── Cascade animation ────────────────────────────────────────────────────────
 
 // Delay between each icon in the left-to-right cascade on shell launch.
-const STAGGER_MS = 100
+const STAGGER_MS = 40
 
 let dockBarRoot: Gtk.Widget | null = null
 
