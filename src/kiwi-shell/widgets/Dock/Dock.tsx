@@ -26,34 +26,34 @@ const lengths = createComputed(get => [
 // Delay between each icon in the left-to-right cascade on shell launch.
 const STAGGER_MS = 40
 
-let dockBarRoot: Gtk.Widget | null = null
+const dockBarRoots = new Set<Gtk.Widget>()
 
-export function cascadeDockIcons() {
-    if (!dockBarRoot) return
+export function cascadeDockIcons(scope?: Gtk.Widget) {
+    const roots = scope ? [scope] : [...dockBarRoots]
 
-    const icons: Gtk.Widget[] = []
+    for (const dockBarRoot of roots) {
+        const icons: Gtk.Widget[] = []
 
-    const walk = (widget: Gtk.Widget) => {
-        if (!widget.get_visible()) return
-        if (widget.has_css_class("app-icon-container")) {
-            icons.push(widget)
-            return
+        const walk = (widget: Gtk.Widget) => {
+            if (!widget.get_visible()) return
+            if (widget.has_css_class("app-icon-container")) {
+                icons.push(widget)
+                return
+            }
+            let child = (widget as any).get_first_child?.()
+            while (child) {
+                walk(child)
+                child = child.get_next_sibling?.()
+            }
         }
-        let child = (widget as any).get_first_child?.()
-        while (child) {
-            walk(child)
-            child = child.get_next_sibling?.()
-        }
+        walk(dockBarRoot)
+        if (icons.length === 0) continue
+
+        icons.forEach(w => w.remove_css_class("fade-in"))
+        icons.forEach((w, i) => {
+            setTimeout(() => w.add_css_class("fade-in"), i * STAGGER_MS)
+        })
     }
-    walk(dockBarRoot)
-    if (icons.length === 0) return
-
-    // Strip any leftover fade-in classes so replaying works cleanly,
-    // then apply fade-in to each icon via a staggered JS timer.
-    icons.forEach(w => w.remove_css_class("fade-in"))
-    icons.forEach((w, i) => {
-        setTimeout(() => w.add_css_class("fade-in"), i * STAGGER_MS)
-    })
 }
 
 // ─── Dock ─────────────────────────────────────────────────────────────────────
@@ -230,9 +230,10 @@ function DockBar({ setMenuOpen, showDock }: {
             class={createComputed(get => `dock-bar${get(showDock) ? "" : " slide-out"}`)}
             halign={Gtk.Align.CENTER}
             $={(self: Gtk.Widget) => {
-                dockBarRoot = self
+                dockBarRoots.add(self)
+                onCleanup(() => dockBarRoots.delete(self))
                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                    cascadeDockIcons()
+                    cascadeDockIcons(self)
                     return GLib.SOURCE_REMOVE
                 })
             }}
