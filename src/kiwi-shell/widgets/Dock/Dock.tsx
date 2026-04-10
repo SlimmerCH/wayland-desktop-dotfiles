@@ -260,6 +260,7 @@ function DockBar({ setMenuOpen, showDock }: {
                         enterClass="fade-in"
                         shouldEnter={(entry) => !prevPinnedSnapshot.has(entry)}
                         children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                        appendOnly
                     />
                 </box>
                 <box

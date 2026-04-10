@@ -52,12 +52,15 @@ export function KeyedList<T>({
                                 disposeMap.set(k, dispose)
                                 self.append(w)
                                 if (initialized) {
-                                    // Always mark as shown so items that switch lists
-                                    // (pin/unpin) are visible without waiting for animation.
-                                    w.add_css_class("shown")
                                     if (enterClass) {
                                         const animate = shouldEnter ? shouldEnter(item) : true
-                                        if (animate) w.add_css_class(enterClass)
+                                        if (animate) {
+                                            w.add_css_class(enterClass)
+                                        } else {
+                                            w.add_css_class("shown")
+                                        }
+                                    } else {
+                                        w.add_css_class("shown")
                                     }
                                 }
                             })
