@@ -23,7 +23,29 @@ function nixConfigExists(): boolean {
     catch { return false }
 }
 
+function deepMerge(defaults: Record<string, any>, overrides: Record<string, any>): Record<string, any> {
+    const result = { ...defaults }
+    for (const key in overrides) {
+        if (
+            overrides[key] !== null &&
+            typeof overrides[key] === "object" &&
+            !Array.isArray(overrides[key]) &&
+            typeof defaults[key] === "object" &&
+            defaults[key] !== null &&
+            !Array.isArray(defaults[key])
+        ) {
+            result[key] = deepMerge(defaults[key], overrides[key])
+        } else {
+            result[key] = overrides[key]
+        }
+    }
+    return result
+}
+
 function loadConfig() {
+    const defaultContent = readFile(DEFAULT_CONFIG_FILE)
+    const defaultConfig = JSON.parse(defaultContent)
+
     if (nixConfigExists()) {
         exec(`cp --no-preserve=mode ${NIX_CONFIG_FILE} ${CONFIG_FILE}`)
     } else {
@@ -34,7 +56,7 @@ function loadConfig() {
     }
 
     const content = readFile(CONFIG_FILE)
-    return JSON.parse(content)
+    return deepMerge(defaultConfig, JSON.parse(content))
 }
 
 async function writeHypr(primaryColor: string) {
@@ -65,7 +87,9 @@ monitorFile(CONFIG_FILE, () => {
     try {
         const content = readFile(CONFIG_FILE)
         if (!content.trim()) return
-        setConf(JSON.parse(content))
+        const defaultContent = readFile(DEFAULT_CONFIG_FILE)
+        const defaultConfig = JSON.parse(defaultContent)
+        setConf(deepMerge(defaultConfig, JSON.parse(content)))
     } catch (error) {
         console.error("Failed to reload config:", error)
     }
