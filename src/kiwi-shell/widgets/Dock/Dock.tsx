@@ -246,26 +246,6 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
     )
 }
 
-// ─── Hover sound wrapper ──────────────────────────────────────────────────────
-
-function SoundIcon({ entry, index, setMenuOpen }: {
-    entry: string,
-    index: number,
-    setMenuOpen: (v: boolean) => void,
-}) {
-    return (
-        <box
-            $={(self) => {
-                const motion = new Gtk.EventControllerMotion()
-                motion.connect("enter", () => conf().dock_arpeggio && playArpeggio(index))
-                self.add_controller(motion)
-            }}
-        >
-            <AppIcon entry={entry} setMenuOpen={setMenuOpen} />
-        </box>
-    )
-}
-
 // ─── DockBar ──────────────────────────────────────────────────────────────────
 
 function DockBar({ setMenuOpen, showDock }: {
@@ -308,7 +288,17 @@ function DockBar({ setMenuOpen, showDock }: {
                             keyFn={(entry) => entry}
                             children={(entry) => {
                                 const index = createComputed(get => get(list).indexOf(entry) + 1)
-                                return <SoundIcon entry={entry} index={index()} setMenuOpen={setMenuOpen} />
+                                return (
+                                    <AppIcon
+                                        entry={entry}
+                                        setMenuOpen={setMenuOpen}
+                                        $={(self) => {
+                                            const motion = new Gtk.EventControllerMotion()
+                                            motion.connect("enter", () => conf().dock_arpeggio && playArpeggio(index()))
+                                            self.add_controller(motion)
+                                        }}
+                                    />
+                                )
                             }}
                         />
                     </box>
@@ -329,7 +319,17 @@ function DockBar({ setMenuOpen, showDock }: {
                                 const index = createComputed(get =>
                                     get(list).length + get(unpinnedList).indexOf(entry) + 1
                                 )
-                                return <SoundIcon entry={entry} index={index()} setMenuOpen={setMenuOpen} />
+                                return (
+                                    <AppIcon
+                                        entry={entry}
+                                        setMenuOpen={setMenuOpen}
+                                        $={(self) => {
+                                            const motion = new Gtk.EventControllerMotion()
+                                            motion.connect("enter", () => conf().dock_arpeggio && playArpeggio(index()))
+                                            self.add_controller(motion)
+                                        }}
+                                    />
+                                )
                             }}
                             appendOnly
                         />
@@ -342,19 +342,16 @@ function DockBar({ setMenuOpen, showDock }: {
                             (get(conf).dock_home == true || get(conf).dock_trash == true)
                         )}
                     />
-                    <box
+                    <HomeFolderButton
+                        setMenuOpen={setMenuOpen}
                         $={(self) => {
                             const motion = new Gtk.EventControllerMotion()
-                            motion.connect("enter", () =>
-                                conf().dock_arpeggio && playArpeggio(extraOffset())
-                            )
+                            motion.connect("enter", () => conf().dock_arpeggio && playArpeggio(extraOffset()))
                             self.add_controller(motion)
                         }}
-                        visible={conf.as(c => c.dock_home == true)}
-                    >
-                        <HomeFolderButton setMenuOpen={setMenuOpen} />
-                    </box>
-                    <box
+                    />
+                    <TrashButton
+                        setMenuOpen={setMenuOpen}
                         $={(self) => {
                             const motion = new Gtk.EventControllerMotion()
                             motion.connect("enter", () =>
@@ -362,10 +359,7 @@ function DockBar({ setMenuOpen, showDock }: {
                             )
                             self.add_controller(motion)
                         }}
-                        visible={conf.as(c => c.dock_trash == true)}
-                    >
-                        <TrashButton setMenuOpen={setMenuOpen} />
-                    </box>
+                    />
                 </box>
             </box>
         </box>
