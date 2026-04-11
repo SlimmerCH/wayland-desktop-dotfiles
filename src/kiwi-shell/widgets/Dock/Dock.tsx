@@ -305,9 +305,10 @@ function DockBar({ setMenuOpen, showDock }: {
                     <box
                         vexpand={true}
                         class="dock-spacer"
-                        visible={createComputed(get =>
+                        /*visible={createComputed(get =>
                             get(list).length > 0 && get(unpinnedList).length > 0
-                        )}
+                        )}*/
+                       visible={false}
                     />
                     <box>
                         <KeyedList
