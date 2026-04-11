@@ -99,7 +99,7 @@ export default function IndicatorBar({  gdkmonitor }: { gdkmonitor: Gdk.Monitor 
         `--primary: ${conf.primary_color};`
       )}
       $={ self => {
-        timeout(500, () => {
+        timeout(1000, () => {
           waiting = false
         })
       }}
