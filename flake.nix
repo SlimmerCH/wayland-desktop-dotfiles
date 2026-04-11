@@ -29,8 +29,6 @@
       entry = "src/kiwi-shell/app.tsx";
 
       # ─── app-capture C library ───────────────────────────────────────────────
-      # Compiles app-capture.c into libappcapture.so and generates the
-      # AppCapture-1.0.typelib that GJS imports via  gi://AppCapture
       app-capture = pkgs.stdenv.mkDerivation {
         pname = "app-capture";
         version = "1.0";
@@ -40,19 +38,19 @@
         nativeBuildInputs = with pkgs; [
           meson
           ninja
-          pkg-config # needed so meson can find all deps
-          wayland-scanner # generates C bindings from XML protocols
-          gobject-introspection # provides g-ir-scanner + g-ir-compiler
+          pkg-config
+          wayland-scanner
+          gobject-introspection
           wrapGAppsHook4
         ];
 
         buildInputs = with pkgs; [
-          wayland # wayland-client (pkg name in nixpkgs)
-          wayland-protocols # the XML protocol definitions
-          gtk4 # gtk4 runtime
-          gtk4.dev # gdk-wayland-4.0 pkg-config file lives here
-          glib # gobject-2.0
-          glib.dev # pkg-config files for gobject-2.0
+          wayland
+          wayland-protocols
+          gtk4
+          gtk4.dev
+          glib
+          glib.dev
         ];
       };
 
@@ -156,7 +154,6 @@
       };
 
       # ─── Dev shell ───────────────────────────────────────────────────────────
-      # Enter with: nix develop
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = [
           (ags.packages.${system}.default.override {
@@ -187,45 +184,33 @@
         }:
         let
           cfg = config.services.kiwi-shell;
+
+          defaultConfig = builtins.fromJSON (builtins.readFile ./src/kiwi-shell/defaultConfig.json);
+
+          inferType = v:
+            if builtins.isBool v then lib.types.bool
+            else if builtins.isInt v then lib.types.int
+            else if builtins.isFloat v then lib.types.float
+            else if builtins.isList v then lib.types.listOf lib.types.str
+            else lib.types.str;
+
+          settingsOptions = builtins.mapAttrs (
+            _: val: lib.mkOption {
+              type = lib.types.nullOr (inferType val);
+              default = val;
+            }
+          ) defaultConfig;
         in
         {
           options.services.kiwi-shell = {
             enable = lib.mkEnableOption "Kiwi Shell for Hyprland";
 
             settings = lib.mkOption {
-              description = "Deterministic settings for Kiwi Shell. These are converted to JSON and read by the app at runtime.";
+              description = "Deterministic settings for Kiwi Shell. Defaults are read from defaultConfig.json at build time.";
               default = null;
               type = lib.types.nullOr (
                 lib.types.submodule {
-                  options = {
-                    primary_color = lib.mkOption {
-                      type = lib.types.str;
-                      default = "rgb(190,157,241)";
-                    };
-                    bar_margin = lib.mkOption {
-                      type = lib.types.int;
-                      default = 4;
-                    };
-                    dock_margin = lib.mkOption {
-                      type = lib.types.int;
-                      default = 4;
-                    };
-                    theme = lib.mkOption {
-                      type = lib.types.str;
-                      default = "default";
-                    };
-                    dock = lib.mkOption {
-                      type = lib.types.str;
-                      default = "default";
-                    };
-                    dock_home = lib.mkOption {
-                      type = lib.types.bool;
-                      default = true;
-                    };
-                    dock_trash = lib.mkOption {
-                      type = lib.types.bool;
-                      default = true;
-                    };
+                  options = settingsOptions // {
                     dock_apps = lib.mkOption {
                       type = lib.types.nullOr (lib.types.listOf lib.types.str);
                       default = null;
