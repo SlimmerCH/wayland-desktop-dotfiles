@@ -1,4 +1,5 @@
 import app from "ags/gtk4/app"
+import App from "ags/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createBinding, onCleanup } from "ags"
 import { conf } from "../config"
@@ -6,8 +7,10 @@ import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE
 import { AppIcon } from "./AppIcon"
 import { HomeFolderButton, TrashButton } from "./DockButtons"
 import { KeyedList } from "./KeyedList"
+import { playSound } from "../sound"
 import Cairo from "cairo"
 import GLib from "gi://GLib"
+import Gio from "gi://Gio"
 
 const clients = createBinding(hyprland, "clients")
 const activeWorkspace = createBinding(hyprland, "focusedWorkspace")
@@ -21,9 +24,43 @@ const lengths = createComputed(get => [
     get(conf).dock_margin
 ])
 
+// ─── Arpeggio folder ──────────────────────────────────────────────────────────
+
+const ROOT = typeof SRC !== "undefined" ? SRC : App.configDir
+
+function pickRandomArpeggio(): string {
+    try {
+        const dir = Gio.File.new_for_path(`${ROOT}/assets/arpeggios`)
+        const enumerator = dir.enumerate_children(
+            "standard::name,standard::type",
+            Gio.FileQueryInfoFlags.NONE,
+            null
+        )
+        const folders: string[] = []
+        let info: Gio.FileInfo | null
+        while ((info = enumerator.next_file(null)) !== null) {
+            if (info.get_file_type() === Gio.FileType.DIRECTORY) {
+                folders.push(info.get_name())
+            }
+        }
+        enumerator.close(null)
+        if (folders.length === 0) return ""
+        return folders[Math.floor(Math.random() * folders.length)]
+    } catch (e) {
+        console.error("Failed to pick arpeggio folder:", e)
+        return ""
+    }
+}
+
+const arpeggioFolder = pickRandomArpeggio()
+
+function playArpeggio(index: number) {
+    if (!arpeggioFolder) return
+    playSound(`arpeggios/${arpeggioFolder}/${index}.wav`)
+}
+
 // ─── Cascade animation ────────────────────────────────────────────────────────
 
-// Delay between each icon in the left-to-right cascade on shell launch.
 const STAGGER_MS = 40
 const CASCADE_DELAY_MS = 100
 
@@ -209,6 +246,26 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
     )
 }
 
+// ─── Hover sound wrapper ──────────────────────────────────────────────────────
+
+function SoundIcon({ entry, index, setMenuOpen }: {
+    entry: string,
+    index: number,
+    setMenuOpen: (v: boolean) => void,
+}) {
+    return (
+        <box
+            $={(self) => {
+                const motion = new Gtk.EventControllerMotion()
+                motion.connect("enter", () => conf().dock_arpeggio && playArpeggio(index))
+                self.add_controller(motion)
+            }}
+        >
+            <AppIcon entry={entry} setMenuOpen={setMenuOpen} />
+        </box>
+    )
+}
+
 // ─── DockBar ──────────────────────────────────────────────────────────────────
 
 function DockBar({ setMenuOpen, showDock }: {
@@ -225,6 +282,10 @@ function DockBar({ setMenuOpen, showDock }: {
             return GLib.SOURCE_REMOVE
         })
     })
+
+    const extraOffset = createComputed(get =>
+        get(list).length + get(unpinnedList).length + 1
+    )
 
     return (
         <box class="dock-bar-container">
@@ -245,7 +306,10 @@ function DockBar({ setMenuOpen, showDock }: {
                         <KeyedList
                             each={pinnedBinding}
                             keyFn={(entry) => entry}
-                            children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                            children={(entry) => {
+                                const index = createComputed(get => get(list).indexOf(entry) + 1)
+                                return <SoundIcon entry={entry} index={index()} setMenuOpen={setMenuOpen} />
+                            }}
                         />
                     </box>
                     <box
@@ -261,7 +325,12 @@ function DockBar({ setMenuOpen, showDock }: {
                             keyFn={(entry) => entry}
                             enterClass="fade-in"
                             shouldEnter={(entry) => !prevPinnedSnapshot.has(entry)}
-                            children={(entry) => <AppIcon entry={entry} setMenuOpen={setMenuOpen} />}
+                            children={(entry) => {
+                                const index = createComputed(get =>
+                                    get(list).length + get(unpinnedList).indexOf(entry) + 1
+                                )
+                                return <SoundIcon entry={entry} index={index()} setMenuOpen={setMenuOpen} />
+                            }}
                             appendOnly
                         />
                     </box>
@@ -273,8 +342,30 @@ function DockBar({ setMenuOpen, showDock }: {
                             (get(conf).dock_home == true || get(conf).dock_trash == true)
                         )}
                     />
-                    <HomeFolderButton setMenuOpen={setMenuOpen} />
-                    <TrashButton setMenuOpen={setMenuOpen} />
+                    <box
+                        $={(self) => {
+                            const motion = new Gtk.EventControllerMotion()
+                            motion.connect("enter", () =>
+                                conf().dock_arpeggio && playArpeggio(extraOffset())
+                            )
+                            self.add_controller(motion)
+                        }}
+                        visible={conf.as(c => c.dock_home == true)}
+                    >
+                        <HomeFolderButton setMenuOpen={setMenuOpen} />
+                    </box>
+                    <box
+                        $={(self) => {
+                            const motion = new Gtk.EventControllerMotion()
+                            motion.connect("enter", () =>
+                                conf().dock_arpeggio && playArpeggio(extraOffset() + (conf().dock_home ? 1 : 0))
+                            )
+                            self.add_controller(motion)
+                        }}
+                        visible={conf.as(c => c.dock_trash == true)}
+                    >
+                        <TrashButton setMenuOpen={setMenuOpen} />
+                    </box>
                 </box>
             </box>
         </box>
