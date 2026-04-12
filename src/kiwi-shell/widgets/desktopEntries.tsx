@@ -1,27 +1,74 @@
 import Gio from "gi://Gio"
 import GioUnix from "gi://GioUnix"
+import GLib from "gi://GLib"
+import { createState } from "ags"
 
 export const classToEntry = new Map<string, string>()
 export const entryToClass = new Map<string, string>()
+export const [mapVersion, setMapVersion] = createState(0)
 
-for (const appInfo of Gio.AppInfo.get_all() as GioUnix.DesktopAppInfo[]) {
-    const id = appInfo.get_id()
-    if (!id) continue
+export function buildClassMap() {
+    classToEntry.clear()
+    entryToClass.clear()
 
-    const stem = id.replace(/\.desktop$/, "").toLowerCase()
-    const wmClass = appInfo.get_startup_wm_class()
+    for (const appInfo of Gio.AppInfo.get_all() as GioUnix.DesktopAppInfo[]) {
+        const id = appInfo.get_id()
+        if (!id) continue
 
-    // Always register the stem
-    if (!classToEntry.has(stem)) {
-        classToEntry.set(stem, id)
-        entryToClass.set(id, stem)
-    }
+        const stem = id.replace(/\.desktop$/, "").toLowerCase()
+        const wmClass = appInfo.get_startup_wm_class()
 
-    // Also register StartupWMClass if different from stem
-    if (wmClass) {
-        const wmClassLower = wmClass.toLowerCase()
-        if (wmClassLower !== stem && !classToEntry.has(wmClassLower)) {
-            classToEntry.set(wmClassLower, id)
+        if (!classToEntry.has(stem)) {
+            classToEntry.set(stem, id)
+            entryToClass.set(id, stem)
+        }
+
+        if (wmClass) {
+            const wmClassLower = wmClass.toLowerCase()
+            if (wmClassLower !== stem && !classToEntry.has(wmClassLower)) {
+                classToEntry.set(wmClassLower, id)
+            }
         }
     }
+
+    console.log(`[ClassMap] Built ${classToEntry.size} entries`)
+    setMapVersion(v => v + 1)
 }
+
+function watchDir(path: string) {
+    const dir = Gio.File.new_for_path(path)
+    if (!dir.query_exists(null)) {
+        console.log(`[ClassMap] Skipping (does not exist): ${path}`)
+        return
+    }
+
+    const monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null)
+    monitor.connect("changed", (_mon, _file, _other, eventType) => {
+        if (
+            eventType !== Gio.FileMonitorEvent.CREATED &&
+            eventType !== Gio.FileMonitorEvent.CHANGED &&
+            eventType !== Gio.FileMonitorEvent.DELETED
+        ) return
+        console.log(`[ClassMap] Detected change in ${path}, rebuilding...`)
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            buildClassMap()
+            return GLib.SOURCE_REMOVE
+        })
+    })
+
+    ;(globalThis as any).__classMapMonitors ??= []
+    ;(globalThis as any).__classMapMonitors.push(monitor)
+
+    console.log(`[ClassMap] Watching ${path}`)
+}
+
+const dataDirs = [
+    `${GLib.get_home_dir()}/.local/share/applications`,
+    `/etc/profiles/per-user/${GLib.get_user_name()}/share/applications`,
+    `/run/current-system/sw/share/applications`,
+    `/run/current-system`, // catches symlink swap on nixos-rebuild switch
+]
+
+for (const dir of dataDirs) watchDir(dir)
+
+buildClassMap()

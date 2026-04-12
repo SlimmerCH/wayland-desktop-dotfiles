@@ -12,6 +12,7 @@ import { For, This, createBinding, createState } from "ags"
 import NotificationCenter, {
   toggleNc,
 } from "./widgets/Notifications/NotificationCenter"
+import { initSteamDesktopPatcher } from "./widgets/services/steamDesktopPatcher";
 
 let sawWarning = false
 
@@ -45,6 +46,7 @@ app.start({
   },
   css: style,
   main() {
+    initSteamDesktopPatcher()
     const monitors = createBinding(app, "monitors")
 
     return (

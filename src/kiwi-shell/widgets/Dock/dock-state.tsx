@@ -3,24 +3,25 @@ import { readFile, writeFileAsync } from "ags/file"
 import { conf } from "../config"
 import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
-import { classToEntry as _classToEntry, entryToClass as _entryToClass } from "../desktopEntries"
+import { classToEntry as _classToEntry, entryToClass as _entryToClass, mapVersion } from "../desktopEntries"
 
 // Apps where the actual Hyprland initial-class doesn't match StartupWMClass.
-// entry -> wmClass (for AppIcon dot tracking & focus)
-// wmClass -> entry (for unpinned list, best-effort — ambiguous when multiple electron apps run)
 const ELECTRON_OVERRIDES: [string, string][] = [
     ["obsidian.desktop", "electron"],
-    // Add more as needed, e.g. ["cursor.desktop", "electron"]
 ]
 
 export const entryToClass = new Map([..._entryToClass, ...ELECTRON_OVERRIDES])
 
-// For classToEntry we only add the override if the class isn't already mapped,
-// so a more specific mapping from desktopEntries always wins.
-export const classToEntry = new Map([
-    ...ELECTRON_OVERRIDES.map(([entry, cls]) => [cls, entry] as [string, string]),
-    ..._classToEntry, // desktopEntries wins on conflict
-])
+// For classToEntry we look up the live map at call time, with electron overrides
+// as lowest priority so a more specific mapping from desktopEntries always wins.
+export function lookupEntry(cls: string): string | undefined {
+    const fromMap = _classToEntry.get(cls)
+    if (fromMap) return fromMap
+    for (const [entry, wmClass] of ELECTRON_OVERRIDES) {
+        if (wmClass === cls) return entry
+    }
+    return undefined
+}
 
 export const DOCK_HIDE_TIMEOUT = 300
 export const DOCK_HIDE_TIMEOUT_EDGE = 600
@@ -59,13 +60,14 @@ export function isValidClient(client: any): boolean {
 }
 
 export const unpinnedList = createComputed(get => {
+    get(mapVersion) // reactive dependency — re-runs when classToEntry rebuilds
     const clients = get(createBinding(hyprland, "clients"))
     const pinned = new Set(get(list))
 
     const seen = new Set<string>()
     return clients.reduce((acc, client) => {
         if (!isValidClient(client)) return acc
-        const entry = classToEntry.get(client["initial-class"].toLowerCase())
+        const entry = lookupEntry(client["initial-class"].toLowerCase())
             ?? (client["initial-class"] + ".desktop")
         if (pinned.has(entry) || seen.has(entry)) return acc
         seen.add(entry)
