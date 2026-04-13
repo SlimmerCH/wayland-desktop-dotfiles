@@ -38,7 +38,7 @@ export function MediaPlayer() {
   })
 
   return (
-    <box>
+    <box visible={activePlayer.as(p => p !== null)}>
       <With value={activePlayer}>
         {(player) => {
           if (!player) return;
