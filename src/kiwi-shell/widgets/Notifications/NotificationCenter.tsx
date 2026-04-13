@@ -5,6 +5,7 @@ import { For, createState, createBinding, createComputed, onCleanup } from "ags"
 import Gio from "gi://Gio"
 import GLib from "gi://GLib"
 import { timeout } from "ags/time"
+import { AppIconImage } from "../appIcon";
 
 import { conf } from "../config";
 
@@ -153,12 +154,8 @@ function Notification({ n }: { n: Notifd.Notification }) {
                 spacing={0}
             >
                 <box class="header">
-                    {n["app-icon"] && (
-                        <Gtk.Image
-                            iconName={n["app-icon"]}
-                            pixelSize={16}
-                            class="notification-icon"
-                        />
+                    {n["desktop-entry"] && (
+                        <AppIconImage entry={n["desktop-entry"].toLowerCase()+".desktop"} pixelSize={16} cssClass="notification-icon" />
                     )}
                     <label class="app-name" label={n["app-name"].toUpperCase()} halign={Gtk.Align.START} />
                 </box>
