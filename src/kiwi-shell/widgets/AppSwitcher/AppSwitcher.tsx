@@ -163,13 +163,12 @@ export function WindowPreview({ client }: { client: any }) {
                 overflow={Gtk.Overflow.HIDDEN}
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
-                heightRequest={160}
+                heightRequest={220}
                 propagateNaturalWidth={true}
             >
                 <Gtk.Picture
                     canShrink={true}
                     contentFit={Gtk.ContentFit.CONTAIN}
-                    heightRequest={150}
                     widthRequest={-1}
                     paintable={texture}
                 />
