@@ -87,9 +87,11 @@ export function cascadeDockIcons(scope?: Gtk.Widget) {
         walk(dockBarRoot)
         if (icons.length === 0) continue
 
-        icons.forEach(w => w.remove_css_class("fade-in"))
+        icons.forEach(w => {
+            w.remove_css_class("fade-in")
+        })
         icons.forEach((w, i) => {
-            setTimeout(() => w.add_css_class("fade-in"), i * STAGGER_MS + CASCADE_DELAY_MS)
+            setTimeout(() => {w.add_css_class("fade-in"); w.add_css_class("reserved")}, i * STAGGER_MS + CASCADE_DELAY_MS)
         })
     }
 }
@@ -137,6 +139,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 --primary: ${conf.primary_color};
                 --dock-margin: ${conf.dock_margin}px;
                 --jumptime: ${JUMP_ANIMATION_CLASS_TIMEOUT}ms;
+                --icon-size: ${conf.dock_icon_size}px:
                 `
             )}
             name="ags-dock"
@@ -268,8 +271,9 @@ function DockBar({ setMenuOpen, showDock }: {
     )
 
     return (
-        <box class="dock-bar-container">
+        <centerbox class="dock-bar-container">
             <box
+                $type="center"
                 class={createComputed(get => `dock-bar${get(showDock) ? "" : " slide-out"}`)}
                 halign={Gtk.Align.CENTER}
                 $={(self: Gtk.Widget) => {
@@ -363,6 +367,6 @@ function DockBar({ setMenuOpen, showDock }: {
                     />
                 </box>
             </box>
-        </box>
+        </centerbox>
     )
 }

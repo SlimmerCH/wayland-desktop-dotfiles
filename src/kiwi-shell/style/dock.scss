@@ -26,7 +26,7 @@
     margin-bottom: 5px;
 
     box-shadow:
-      rgba(0, 0, 0, 0.5) 0px 8px 12px 0px,
+      rgba(0, 0, 0, 0.5) 0px 8px 12px 0px;
 }
 
 .dock-app-icon {
@@ -50,7 +50,7 @@
 }
 
 .dock-app-icon, .app-context-menu {
-    transition: all 180ms ease-out;
+    transition: all 175ms ease-out;
 }
 
 .client-dots {
@@ -143,9 +143,22 @@
     100% { transform: translateY(0); }
 }
 
+$slide-margin: calc(var(--icon-size) / 2 * -1);
+
 @keyframes icon-slide {
-    0%   { transform: translateY(80px); opacity: 0.5;}
-    80%  { transform: translateY(-3px); }
+    0%   { transform: translateY(80px); opacity: 0.4;}
+    80%  { transform: translateY(-3px);}
+    93%  { transform: translateY(1px); }
+    100% { transform: translateY(0); opacity: 1;}
+}
+
+@keyframes grow-h {
+    0%   {
+        transform: translateY(80px) scaleX(0); opacity: 0.4;
+        margin-left: -25px;
+        margin-right: -25px;
+    }
+    80%  { transform: translateY(-3px) scaleX(1); margin: 0;}
     93%  { transform: translateY(1px); }
     100% { transform: translateY(0); opacity: 1;}
 }
@@ -174,7 +187,15 @@ $jumptime: var(--jumptime);
     animation: icon-slide 650ms ease forwards;
 }
 
+.fade-in {
+    animation: icon-slide 650ms ease forwards;
+    &:not(.reserved) {
+        animation: grow-h 550ms ease forwards;        
+    }
+}
+
+
+
 .shown {
     transform: translateY(0); opacity: 1;
 }
-
