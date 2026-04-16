@@ -3,12 +3,12 @@ import App from "ags/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createBinding, onCleanup } from "ags"
 import { conf } from "../config"
-import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE, JUMP_ANIMATION_CLASS_TIMEOUT } from "./dock-state"
+import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE, JUMP_ANIMATION_CLASS_TIMEOUT, DOCK_SLIDE_DURATION } from "./dock-state"
 import { AppIcon } from "./AppIcon"
 import { HomeFolderButton, TrashButton } from "./DockButtons"
 import { KeyedList } from "./KeyedList"
 import { playSound } from "../sound"
-import Cairo from "cairo"
+import Cairo from "gi://cairo"
 import GLib from "gi://GLib"
 import Gio from "gi://Gio"
 
@@ -102,8 +102,10 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const [dockTrigger, setDockTrigger] = createState(false)
     const [dockHovered, setDockHovered] = createState(false)
     const [menuOpen, setMenuOpen] = createState(false)
-    let hideTimeout: number | null = null
     let leaveTimeout: number | null = null
+    let selfRef: Astal.Window | null = null
+    let dockBoxRef: Gtk.Widget | null = null
+    let wasShowing = false
 
     const showDock = createComputed(get => {
         const config = get(conf)
@@ -132,6 +134,46 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         return !hastiledWindow
     })
 
+    // Sets input region to just the dock box bounds.
+    const setNarrowRegion = () => {
+        if (!selfRef || !dockBoxRef) return
+        const surface = selfRef.get_surface()
+        if (!surface) return
+        const [ok, bounds] = dockBoxRef.compute_bounds(selfRef)
+        if (!ok) return
+        const rect = new Cairo.RectangleInt()
+        rect.x = Math.floor(bounds.get_x())
+        rect.y = Math.floor(bounds.get_y())
+        rect.width = Math.ceil(bounds.get_width())
+        rect.height = Math.ceil(bounds.get_height())
+        const region = new Cairo.Region()
+        region.unionRectangle(rect)
+        surface.set_input_region(region)
+    }
+
+    // Called on showDock change or init:
+    // - hidden → empty region (full click-through)
+    // - just became visible in auto-hide → full window so cursor can travel up
+    // - already visible, or default mode → narrow region (dock box only)
+    const updateRegion = () => {
+        if (!selfRef) return
+        const surface = selfRef.get_surface()
+        if (!surface) return
+        const isShowing = showDock()
+        if (!isShowing) {
+            surface.set_input_region(new Cairo.Region())
+            // Delay wasShowing reset so re-triggering during slide-down
+            // doesn't open full-width region again mid-animation
+            setTimeout(() => { wasShowing = false }, DOCK_SLIDE_DURATION)
+        } else if (!wasShowing && conf().dock === "auto-hide") {
+            surface.set_input_region(null)
+            wasShowing = true
+        } else {
+            setNarrowRegion()
+            wasShowing = true
+        }
+    }
+
     return [(
         <window
             css={conf.as(conf =>
@@ -139,7 +181,8 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 --primary: ${conf.primary_color};
                 --dock-margin: ${conf.dock_margin}px;
                 --jumptime: ${JUMP_ANIMATION_CLASS_TIMEOUT}ms;
-                --icon-size: ${conf.dock_icon_size}px:
+                --icon-size: ${conf.dock_icon_size}px;
+                --dock-slide-duration: ${DOCK_SLIDE_DURATION}ms;
                 `
             )}
             name="ags-dock"
@@ -149,18 +192,28 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             exclusivity={conf.as(conf =>
                 conf.dock == "auto-hide" ? Astal.Exclusivity.NORMAL : Astal.Exclusivity.EXCLUSIVE
             )}
-            anchor={Astal.WindowAnchor.BOTTOM}
+            anchor={Astal.WindowAnchor.LEFT | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.RIGHT}
             application={app}
             layer={Astal.Layer.TOP}
             $={(self) => {
+                selfRef = self
                 onCleanup(() => self.destroy())
 
                 const motionController = new Gtk.EventControllerMotion()
-                motionController.connect("enter", () => {
-                    if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
-                    setDockHovered(true)
+                motionController.connect("motion", (_controller, x, y) => {
+                    if (!dockBoxRef) return
+                    const [ok, bounds] = dockBoxRef.compute_bounds(self)
+                    if (!ok) return
+                    const inBounds =
+                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
+                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
+                    if (inBounds) {
+                        if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
+                        setDockHovered(true)
+                    }
                 })
                 motionController.connect("leave", () => {
+                    setNarrowRegion()
                     leaveTimeout = setTimeout(() => {
                         setDockHovered(false)
                         leaveTimeout = null
@@ -169,11 +222,20 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 self.add_controller(motionController)
 
                 const dragMotion = new Gtk.DropControllerMotion()
-                dragMotion.connect("enter", () => {
-                    if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
-                    setDockHovered(true)
+                dragMotion.connect("motion", (_controller, x, y) => {
+                    if (!dockBoxRef) return
+                    const [ok, bounds] = dockBoxRef.compute_bounds(self)
+                    if (!ok) return
+                    const inBounds =
+                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
+                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
+                    if (inBounds) {
+                        if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
+                        setDockHovered(true)
+                    }
                 })
                 dragMotion.connect("leave", () => {
+                    setNarrowRegion()
                     leaveTimeout = setTimeout(() => {
                         setDockHovered(false)
                         leaveTimeout = null
@@ -182,33 +244,59 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 self.add_controller(dragMotion)
 
                 showDock.subscribe(() => {
-                    const surface = self.get_surface()
-                    if (!surface) return
-                    if (showDock()) {
-                        surface.set_input_region(null)
-                    } else {
-                        surface.set_input_region(new Cairo.Region())
-                    }
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        updateRegion()
+                        return GLib.SOURCE_REMOVE
+                    })
                 })
 
-                lengths()
+                let prevMode = conf().dock
+                conf.subscribe(() => {
+                    const mode = conf().dock
+                    if (mode === prevMode) return
+                    prevMode = mode
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        wasShowing = false
+                        updateRegion()
+                        setTimeout(() => setNarrowRegion(), DOCK_SLIDE_DURATION)
+                        return GLib.SOURCE_REMOVE
+                    })
+                })
+
                 lengths.subscribe(() => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        self.set_default_size(-1, -1)
-                        self.queue_resize()
+                        setNarrowRegion()
                         return GLib.SOURCE_REMOVE
                     })
                 })
             }}
         >
-            <DockBar setMenuOpen={setMenuOpen} showDock={showDock} />
+            <DockBar
+                setMenuOpen={setMenuOpen}
+                showDock={showDock}
+                onDockBoxReady={(widget) => {
+                    dockBoxRef = widget
+                    let signalId: number | null = widget.connect("notify::width", () => {
+                        if (widget.get_width() > 0) {
+                            if (signalId !== null) {
+                                widget.disconnect(signalId)
+                                signalId = null
+                            }
+                            updateRegion()
+                        }
+                    })
+                }}
+            />
         </window>
-    ), <EdgeSensor gdkmonitor={gdkmonitor} hideTimeout={hideTimeout} setDockTrigger={setDockTrigger} />]
+    ), <EdgeSensor gdkmonitor={gdkmonitor} setDockTrigger={setDockTrigger} />]
 }
 
 // ─── EdgeSensor ───────────────────────────────────────────────────────────────
 
-function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: Gdk.Monitor }) {
+function EdgeSensor({ gdkmonitor, setDockTrigger }: {
+    gdkmonitor: Gdk.Monitor,
+    setDockTrigger: (v: boolean) => void,
+}) {
     return (
         <window
             name="ags-dock-sensor"
@@ -221,24 +309,30 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
             visible={conf.as(conf => conf.dock == "auto-hide")}
             $={(self) => {
                 onCleanup(() => self.destroy())
+                let triggerTimeout: number | null = null
+
                 const motionController = new Gtk.EventControllerMotion()
                 motionController.connect("enter", () => {
-                    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null }
+                    if (triggerTimeout) { clearTimeout(triggerTimeout); triggerTimeout = null }
                     setDockTrigger(true)
-                    hideTimeout = setTimeout(() => {
+                })
+                motionController.connect("leave", () => {
+                    triggerTimeout = setTimeout(() => {
                         setDockTrigger(false)
-                        hideTimeout = null
+                        triggerTimeout = null
                     }, DOCK_HIDE_TIMEOUT_EDGE)
                 })
                 self.add_controller(motionController)
 
                 const dragMotion = new Gtk.DropControllerMotion()
                 dragMotion.connect("enter", () => {
-                    if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null }
+                    if (triggerTimeout) { clearTimeout(triggerTimeout); triggerTimeout = null }
                     setDockTrigger(true)
-                    hideTimeout = setTimeout(() => {
+                })
+                dragMotion.connect("leave", () => {
+                    triggerTimeout = setTimeout(() => {
                         setDockTrigger(false)
-                        hideTimeout = null
+                        triggerTimeout = null
                     }, DOCK_HIDE_TIMEOUT_EDGE)
                 })
                 self.add_controller(dragMotion)
@@ -251,9 +345,10 @@ function EdgeSensor({ gdkmonitor, hideTimeout, setDockTrigger }: { gdkmonitor: G
 
 // ─── DockBar ──────────────────────────────────────────────────────────────────
 
-function DockBar({ setMenuOpen, showDock }: {
+function DockBar({ setMenuOpen, showDock, onDockBoxReady }: {
     setMenuOpen: (v: boolean) => void,
-    showDock: ReturnType<typeof createComputed<boolean>>
+    showDock: ReturnType<typeof createComputed<boolean>>,
+    onDockBoxReady: (widget: Gtk.Widget) => void,
 }) {
     const pinnedBinding = createComputed(get => get(list))
     const unpinnedBinding = createComputed(get => get(unpinnedList))
@@ -285,7 +380,12 @@ function DockBar({ setMenuOpen, showDock }: {
                     })
                 }}
             >
-                <box $type="center" class="dock-box" orientation={Gtk.Orientation.HORIZONTAL}>
+                <box
+                    $type="center"
+                    class="dock-box"
+                    orientation={Gtk.Orientation.HORIZONTAL}
+                    $={(self: Gtk.Widget) => onDockBoxReady(self)}
+                >
                     <box>
                         <KeyedList
                             each={pinnedBinding}

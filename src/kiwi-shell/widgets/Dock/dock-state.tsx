@@ -5,6 +5,11 @@ import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
 import { classToEntry as _classToEntry, entryToClass as _entryToClass, mapVersion } from "../desktopEntries"
 
+export const DOCK_HIDE_TIMEOUT = 300
+export const DOCK_HIDE_TIMEOUT_EDGE = 600
+export const JUMP_ANIMATION_CLASS_TIMEOUT = 500
+export const DOCK_SLIDE_DURATION = 400
+
 // Apps where the actual Hyprland initial-class doesn't match StartupWMClass.
 const ELECTRON_OVERRIDES: [string, string][] = [
     ["obsidian.desktop", "electron"],
@@ -22,10 +27,6 @@ export function lookupEntry(cls: string): string | undefined {
     }
     return undefined
 }
-
-export const DOCK_HIDE_TIMEOUT = 300
-export const DOCK_HIDE_TIMEOUT_EDGE = 600
-export const JUMP_ANIMATION_CLASS_TIMEOUT = 500
 
 export const hyprland = Hyprland.get_default()
 
