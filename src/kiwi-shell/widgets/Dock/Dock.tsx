@@ -153,8 +153,8 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
 
     // Called on showDock change or init:
     // - hidden → empty region (full click-through)
-    // - just became visible in auto-hide → full window so cursor can travel up
-    // - already visible, or default mode → narrow region (dock box only)
+    // - showing in auto-hide → full window so cursor can travel up to dock
+    // - showing in default mode → narrow region (dock box only)
     const updateRegion = () => {
         if (!selfRef) return
         const surface = selfRef.get_surface()
@@ -162,10 +162,8 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         const isShowing = showDock()
         if (!isShowing) {
             surface.set_input_region(new Cairo.Region())
-            // Delay wasShowing reset so re-triggering during slide-down
-            // doesn't open full-width region again mid-animation
             setTimeout(() => { wasShowing = false }, DOCK_SLIDE_DURATION)
-        } else if (!wasShowing && conf().dock === "auto-hide") {
+        } else if (conf().dock === "auto-hide") {
             surface.set_input_region(null)
             wasShowing = true
         } else {
@@ -190,7 +188,9 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             gdkmonitor={gdkmonitor}
             visible={true}
             exclusivity={conf.as(conf =>
-                conf.dock == "auto-hide" ? Astal.Exclusivity.NORMAL : Astal.Exclusivity.EXCLUSIVE
+                conf.dock === "default"
+                    ? Astal.Exclusivity.EXCLUSIVE
+                    : Astal.Exclusivity.NORMAL
             )}
             anchor={Astal.WindowAnchor.LEFT | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.RIGHT}
             application={app}
