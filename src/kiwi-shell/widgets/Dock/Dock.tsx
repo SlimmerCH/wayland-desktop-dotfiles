@@ -243,9 +243,16 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 })
                 self.add_controller(dragMotion)
 
+                let modeTransitioning = false
+
                 showDock.subscribe(() => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        updateRegion()
+                        if (!modeTransitioning) {
+                            updateRegion()
+                            if (showDock() && conf().dock === "auto-hide") {
+                                setTimeout(() => setNarrowRegion(), DOCK_SLIDE_DURATION)
+                            }
+                        }
                         return GLib.SOURCE_REMOVE
                     })
                 })
@@ -256,9 +263,14 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     if (mode === prevMode) return
                     prevMode = mode
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        wasShowing = false
-                        updateRegion()
-                        setTimeout(() => setNarrowRegion(), DOCK_SLIDE_DURATION)
+                        modeTransitioning = true
+                        const surface = selfRef?.get_surface()
+                        if (surface) surface.set_input_region(null)
+                        setTimeout(() => {
+                            modeTransitioning = false
+                            wasShowing = false
+                            updateRegion()
+                        }, DOCK_SLIDE_DURATION)
                         return GLib.SOURCE_REMOVE
                     })
                 })
