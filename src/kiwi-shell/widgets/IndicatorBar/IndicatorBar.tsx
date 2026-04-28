@@ -10,6 +10,7 @@ import { volumeIcon, brightnessIcon, keyboardBrightnessIcon, Icon } from "../ico
 import { conf } from "../config"
 import { brightness, setBrightnessLevel, kbdBrightness, kbdAvailable, brightnessAvailable } from "../brightness"
 import { systemTabOpen } from "../Bar/SystemMenu/SystemMenu"
+import { watchIndicatorKeys } from "../inputWatcher"
 
 const fadeTimeout = 2500
 
@@ -21,24 +22,16 @@ const min_brightness = 10;
 
 let waiting = true;
 
-volumeBinding.subscribe(() => showIndicator('volume'))
-muteBinding.subscribe(() => showIndicator('volume'))
-
-if (brightnessAvailable) {
-  brightness.subscribe(() => showIndicator('brightness'))
-}
-
 if (kbdAvailable) {
   kbdBrightness.subscribe(() => showIndicator('keyboardBrightness'))
 }
 
+watchIndicatorKeys((type) => showIndicator(type))
+
 export function showIndicator(type: string){
-  if (waiting) return;
   setIndicatorType(type)
-  if (!systemTabOpen() || !['volume', 'brightness'].includes(type)) {
-    setVisibility(true);
-    resetIndicatorTimeout() 
-  }
+  setVisibility(true);
+  resetIndicatorTimeout() 
 }
 
 const [indicatorType, setIndicatorType] = createState('brightness')
@@ -91,7 +84,7 @@ function resetIndicatorTimeout() {
 }
 
 
-export default function IndicatorBar({  gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
+export default function IndicatorBar({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
 
   return (
     <window

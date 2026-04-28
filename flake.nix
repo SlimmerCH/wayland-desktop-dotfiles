@@ -28,6 +28,29 @@
       pname = "kiwi";
       entry = "src/kiwi-shell/app.tsx";
 
+      # ─── hyprland-shortcuts C library ────────────────────────────────────────
+      hyprland-shortcuts = pkgs.stdenv.mkDerivation {
+        pname = "hyprland-shortcuts";
+        version = "1.0";
+
+        src = ./src/hyprland-shortcuts;
+
+        nativeBuildInputs = with pkgs; [
+          meson
+          ninja
+          pkg-config
+          wayland-scanner
+          gobject-introspection
+          wrapGAppsHook4
+        ];
+
+        buildInputs = with pkgs; [
+          wayland
+          glib
+          glib.dev
+        ];
+      };
+
       # ─── app-capture C library ───────────────────────────────────────────────
       app-capture = pkgs.stdenv.mkDerivation {
         pname = "app-capture";
@@ -73,6 +96,7 @@
         pkgs.libadwaita
         pkgs.libsoup_3
         app-capture
+        hyprland-shortcuts
       ];
 
       # ─── Kiwi Shell package ───────────────────────────────────────────────
@@ -115,7 +139,9 @@
               ]
             }" \
             --prefix GI_TYPELIB_PATH : "${app-capture}/lib/girepository-1.0" \
-            --prefix LD_LIBRARY_PATH : "${app-capture}/lib"
+            --prefix GI_TYPELIB_PATH : "${hyprland-shortcuts}/lib/girepository-1.0" \
+            --prefix LD_LIBRARY_PATH : "${app-capture}/lib" \
+            --prefix LD_LIBRARY_PATH : "${hyprland-shortcuts}/lib"
 
           # Logging Wrapper
           cat << 'EOF' > $out/bin/${pname}
@@ -142,6 +168,7 @@
       packages.${system} = {
         shell = kiwi-package;
         app-capture = app-capture;
+        hyprland-shortcuts = hyprland-shortcuts;
         settings = kiwi-settings.packages.${system}.default;
 
         default = pkgs.symlinkJoin {
