@@ -1,6 +1,7 @@
 import KiwiShortcuts from "gi://KiwiShortcuts"
 import { brightnessAvailable, kbdAvailable } from "./brightness"
 import { execAsync } from "ags/process"
+import Hyprland from "gi://AstalHyprland"
 
 const SHORTCUT_MAP: Record<string, string> = {
   'volume-up':           'volume',
@@ -35,6 +36,9 @@ let manager: KiwiShortcuts.Manager | null = null
 
 export function watchIndicatorKeys(onKey: (type: string) => void) {
   registerHyprlandBinds()
+
+  const hyprland = Hyprland.get_default()
+  hyprland.connect('config-reloaded', registerHyprlandBinds)
 
   manager = new KiwiShortcuts.Manager()
 

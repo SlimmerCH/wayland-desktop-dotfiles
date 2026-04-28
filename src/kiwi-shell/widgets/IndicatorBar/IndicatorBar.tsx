@@ -99,13 +99,13 @@ export default function IndicatorBar({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }
       visible={isVisible}
       name="ags-indicator"
       class={conf.as(conf =>
-        `IndicatorBar theme-${conf.theme}`
+        `IndicatorBar theme-${conf.theme} ${conf.indicator_bar_position}`
       )}
       gdkmonitor={gdkmonitor}
       exclusivity={Astal.Exclusivity.NORMAL}
-      anchor={
-        Astal.WindowAnchor.BOTTOM
-      }
+      anchor={conf.as(conf =>
+        conf.indicator_bar_position == "left" ? Astal.WindowAnchor.LEFT : Astal.WindowAnchor.BOTTOM
+      )}
       application={app}
       layer={Astal.Layer.TOP}
     >
@@ -130,25 +130,35 @@ function indicatorChange(value: number) {
 function Indicator(){
   return (
     <box class="indicator-bar">
-      <box class="indicator-box">
+      <box class="indicator-box"
+        orientation={conf(conf =>
+          conf.indicator_bar_position == "left" ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL
+        )}
+      >
         <Icon
           class={indicatorIcon.as((icon) => 'indicator-icon '+icon)}
           iconName={indicatorIcon}
           pixelSize={16}
         />
-      <slider
-        class={indicatorType}
-        draw_value={false}
-        min={0}
-        max={1}
-        step={0.01}
-        value={indicatorValue}
-        onChangeValue={(self) => {
-          resetIndicatorTimeout()
-          indicatorChange(self.value)
-        }}
-        sensitive={isSensitive}
-      />
+        <slider
+          class={indicatorType}
+          draw_value={false}
+          min={0}
+          max={1}
+          step={0.01}
+          value={indicatorValue}
+          onChangeValue={(self) => {
+            resetIndicatorTimeout()
+            indicatorChange(self.value)
+          }}
+          sensitive={isSensitive}
+          orientation={conf(conf =>
+            conf.indicator_bar_position == "left" ? Gtk.Orientation.VERTICAL : Gtk.Orientation.HORIZONTAL
+          )}
+          inverted={conf(conf =>
+            conf.indicator_bar_position == "left"
+          )}
+        />
       </box>
     </box>
   )

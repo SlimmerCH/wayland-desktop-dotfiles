@@ -23,3 +23,26 @@
         transform: translateY(1px);
     }
 }
+
+.IndicatorBar.left {
+    margin-bottom: 0;
+    margin-left: 8px;
+
+    .indicator-icon {
+        margin-right: 0;
+        margin-bottom: 10px;
+        margin-top: -2px;
+    }
+    .indicator-box {
+        padding: 15px 12px;
+    }
+
+    scale {
+        min-height: 120px;
+        min-width: unset;
+        trough {
+            min-width: 6px; 
+            min-height: unset;
+        }
+    }
+}
