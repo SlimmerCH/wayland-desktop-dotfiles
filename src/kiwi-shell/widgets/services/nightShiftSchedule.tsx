@@ -30,27 +30,31 @@ function subscribeChanged<T>(accessor: Accessor<T>, callback: () => void) {
     });
 }
 
-function updateNightShift(){
-    print("update nightshift")
-    const config = conf()
-    
+function updateNightShift() {
+    const config = conf();
+
     if (isWithinTimeframe(config.nightshift_start, config.nightshift_end) && config.auto_nightshift) {
         if (!nightShift()) {
-            execAsync(`hyprsunset -t ${conf().nightshift_intensity}`)
-            setNightShift(true)
+            execAsync(`hyprsunset -t ${config.nightshift_intensity}`);
+            setNightShift(true);
         }
     } else {
         if (nightShift()) {
-            execAsync("killall hyprsunset")
-            setNightShift(false)
+            execAsync("killall hyprsunset");
+            setNightShift(false);
         }
     }
 }
 
-export default function nightShiftService(){
-    updateNightShift()
+export default function nightShiftService() {
+    updateNightShift();
 
-    subscribeChanged(conf.as(c => c.auto_nightshift), updateNightShift)
-    subscribeChanged(conf.as(c => c.nightshift_start), updateNightShift)
-    subscribeChanged(conf.as(c => c.nightshift_end), updateNightShift)
+    subscribeChanged(conf.as(c => c.auto_nightshift), updateNightShift);
+    subscribeChanged(conf.as(c => c.nightshift_start), updateNightShift);
+    subscribeChanged(conf.as(c => c.nightshift_end), updateNightShift);
+
+    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
+        updateNightShift();
+        return GLib.SOURCE_CONTINUE;
+    });
 }
