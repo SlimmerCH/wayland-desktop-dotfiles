@@ -13,8 +13,9 @@ import { MediaPlayer } from "../../../Misc"
 import { Icon, powerProfileIcon, volumeIcon, brightnessIcon } from "../../../iconNames"
 import { brightness, setBrightnessLevel } from "../../../brightness"
 import { closeSystemMenu } from "../SystemMenu";
+import { conf } from "../../../config";
 
-const [nightShift, setNightShift] = createState(false);
+export const [nightShift, setNightShift] = createState(false);
 
 const max_brightness = parseInt(exec("brightnessctl max"))
 const nightShiftTemp = 4000;
@@ -155,7 +156,7 @@ function OptionButtons(){
                 execAsync("killall hyprsunset")
               } else {
                 setNightShift(true);
-                execAsync(`hyprsunset -t ${nightShiftTemp}`)
+                execAsync(`hyprsunset -t ${conf().nightshift_intensity}`)
               }
 
           }}

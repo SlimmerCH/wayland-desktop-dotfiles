@@ -68,7 +68,7 @@ function handleFileEvent(
     })
 }
 
-export function initSteamDesktopPatcher(): void {
+export default function steamDesktopPatcher(): void {
     const dir = Gio.File.new_for_path(APPLICATIONS_DIR)
 
     try {
