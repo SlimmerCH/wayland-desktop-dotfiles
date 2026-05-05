@@ -83,7 +83,9 @@ if (nixConfigExists()) {
     writeHypr(initialConfig.primary_color)
 }
 
-monitorFile(CONFIG_FILE, () => {
+let reloadTimeout: number | null = null
+
+function reloadConfig() {
     try {
         const content = readFile(CONFIG_FILE)
         if (!content.trim()) return
@@ -93,6 +95,17 @@ monitorFile(CONFIG_FILE, () => {
     } catch (error) {
         console.error("Failed to reload config:", error)
     }
+}
+
+monitorFile(CONFIG_FILE, () => {
+    if (reloadTimeout !== null) {
+        GLib.source_remove(reloadTimeout)
+    }
+    reloadTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+        reloadTimeout = null
+        reloadConfig()
+        return GLib.SOURCE_REMOVE
+    })
 })
 
 export async function writeConf() {
