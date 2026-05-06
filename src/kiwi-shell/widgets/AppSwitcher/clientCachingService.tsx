@@ -15,6 +15,12 @@ const NEW_WINDOW_CAPTURE_DELAY_MS = 800
 // every window. Skipped if a capture for this address is already fresh.
 const FOCUSED_POLL_INTERVAL_MS = 6_000
 
+// Backstop in case the C library never emits either signal (e.g. compositor
+// stalled). C-side handles its own timeouts at 1.5s for the wlr-mapping race
+// and reports failure synchronously for everything else, so this should
+// effectively never fire.
+const SAFETY_TIMEOUT_MS = 5_000
+
 const capturer = new AppCapture.Capture()
 const hyprland = Hyprland.get_default()
 
@@ -27,7 +33,9 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>()
 
 // ─── Concurrency queue ─────────────────────────────────────────────────────────
-// Only one capture runs at a time to avoid piling up memfd allocations.
+// Only one capture runs at a time. The C library itself has shared per-frame
+// state (shm_fd, dimensions, pixel buffer) so concurrent captures would
+// clobber each other.
 let activeCapture = false
 const captureQueue: Array<() => void> = []
 
@@ -42,35 +50,45 @@ function captureNow(address: string): Promise<Gdk.Texture | null> {
     return new Promise((resolve) => {
         captureQueue.push(() => {
             activeCapture = true
-            let signalId: number | null = null
+            let readyId = 0
+            let failedId = 0
+            let safetyId: ReturnType<typeof setTimeout> | null = null
 
             const finish = (result: Gdk.Texture | null) => {
+                if (readyId)  { capturer.disconnect(readyId);  readyId  = 0 }
+                if (failedId) { capturer.disconnect(failedId); failedId = 0 }
+                if (safetyId) { clearTimeout(safetyId);        safetyId = null }
                 activeCapture = false
                 resolve(result)
                 Promise.resolve().then(drainQueue)
             }
 
-            const timeoutId = setTimeout(() => {
-                if (signalId !== null) capturer.disconnect(signalId)
-                console.error(`AppCapture: timeout for address ${address}`)
-                finish(null)
-            }, 2000)
-
-            signalId = capturer.connect(
+            readyId = capturer.connect(
                 "frame-ready",
                 (_obj: any, bytes: any, width: number, height: number, stride: number) => {
-                    capturer.disconnect(signalId!)
-                    clearTimeout(timeoutId)
                     let texture: Gdk.Texture | null = null
                     try {
                         texture = buildTexture(bytes, width, height, stride)
                     } catch (e) {
-                        console.error(`AppCapture: buildTexture failed: ${e}`)
+                        console.error(`AppCapture: buildTexture failed for ${address}: ${e}`)
                     }
                     if (texture) cache.set(address, { texture, capturedAt: Date.now() })
                     finish(texture)
                 }
             )
+
+            failedId = capturer.connect(
+                "frame-failed",
+                (_obj: any, _reason: string) => {
+                    // C side already logged via g_warning. No need to echo.
+                    finish(null)
+                }
+            )
+
+            safetyId = setTimeout(() => {
+                console.error(`AppCapture: safety timeout for ${address} — wayland event loop stalled?`)
+                finish(null)
+            }, SAFETY_TIMEOUT_MS)
 
             capturer.capture_by_handle(address)
         })

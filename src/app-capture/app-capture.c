@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "hyprland-toplevel-export-v1.h"
 #include "wlr-foreign-toplevel-management-unstable-v1.h"
@@ -18,10 +19,15 @@
 
 enum {
     SIGNAL_FRAME_READY,
+    SIGNAL_FRAME_FAILED,
     LAST_SIGNAL
 };
 
 static guint signals[LAST_SIGNAL] = { 0 };
+
+/* How long capture_by_handle() will wait for an unknown address's wlr handle
+ * to arrive before giving up and emitting frame-failed. */
+#define PENDING_CAPTURE_TIMEOUT_MS 1500
 
 /* =========================================================================
  * Toplevel entry — one per live wlr toplevel
@@ -40,6 +46,16 @@ typedef struct {
 } ToplevelEntry;
 
 /* =========================================================================
+ * Pending capture — capture_by_handle() called before mapping arrived
+ * ========================================================================= */
+
+typedef struct {
+    AppCapture *self;       /* unowned; pending queue is owned by self */
+    char       *address;    /* owned, stripped of "0x" */
+    guint       timeout_id; /* 0 once consumed */
+} PendingCapture;
+
+/* =========================================================================
  * Object struct
  * ========================================================================= */
 
@@ -55,7 +71,10 @@ struct _AppCapture {
     struct hyprland_toplevel_mapping_manager_v1 *mapping_manager;
 
     /* Address → wlr_handle table */
-    GPtrArray *toplevels;   /* element-type: ToplevelEntry* */
+    GPtrArray *toplevels;        /* element-type: ToplevelEntry* */
+
+    /* Captures waiting on a not-yet-mapped address */
+    GPtrArray *pending_captures; /* element-type: PendingCapture* */
 
     /* Per-frame state — reset before every capture */
     int            shm_fd;
@@ -73,8 +92,16 @@ G_DEFINE_TYPE(AppCapture, app_capture, G_TYPE_OBJECT)
  * Forward declarations
  * ========================================================================= */
 
-static void cleanup_shm(AppCapture *self);
-static void request_mapping(AppCapture *self, ToplevelEntry *entry);
+static void     cleanup_shm(AppCapture *self);
+static void     request_mapping(AppCapture *self, ToplevelEntry *entry);
+static void     emit_frame_failed(AppCapture *self, const char *reason);
+static void     do_capture(AppCapture *self,
+                           struct zwlr_foreign_toplevel_handle_v1 *wlr_handle);
+static struct zwlr_foreign_toplevel_handle_v1 *find_wlr_handle(AppCapture *self,
+                                                               const char *addr);
+static void     flush_pending_for_address(AppCapture *self, const char *address);
+static gboolean pending_capture_timeout_cb(gpointer data);
+static void     pending_capture_free(gpointer data);
 
 /* =========================================================================
  * Hyprland toplevel mapping listener
@@ -92,10 +119,14 @@ static void mapping_handle_window_address(void *data,
 {
     MappingContext *ctx = data;
     ToplevelEntry  *entry = ctx->entry;
+    AppCapture     *self  = ctx->self;
 
     uint64_t full = ((uint64_t)address_hi << 32) | (uint64_t)address;
     snprintf(entry->address, sizeof(entry->address), "%" PRIx64, full);
     entry->mapped = TRUE;
+
+    /* Dispatch any capture that was waiting for this address */
+    flush_pending_for_address(self, entry->address);
 
     hyprland_toplevel_window_mapping_handle_v1_destroy(handle);
     g_free(ctx);
@@ -105,7 +136,8 @@ static void mapping_handle_failed(void *data,
     struct hyprland_toplevel_window_mapping_handle_v1 *handle)
 {
     MappingContext *ctx = data;
-    /* Address stays empty — this entry won't be matchable, which is fine */
+    /* Address stays empty — this entry won't be matchable, which is fine.
+     * Any pending capture for that address will time out via its own timer. */
     hyprland_toplevel_window_mapping_handle_v1_destroy(handle);
     g_free(ctx);
 }
@@ -178,6 +210,7 @@ static void wlr_manager_handle_toplevel(void *data,
     struct zwlr_foreign_toplevel_manager_v1 *manager,
     struct zwlr_foreign_toplevel_handle_v1 *handle)
 {
+    (void)manager;
     AppCapture    *self  = APP_CAPTURE(data);
     ToplevelEntry *entry = g_new0(ToplevelEntry, 1);
     entry->wlr_handle = handle;
@@ -227,6 +260,7 @@ static void request_mapping(AppCapture *self, ToplevelEntry *entry)
 static void registry_handle_global(void *data, struct wl_registry *registry,
     uint32_t name, const char *interface, uint32_t version)
 {
+    (void)version;
     AppCapture *self = APP_CAPTURE(data);
 
     if (g_strcmp0(interface,
@@ -270,6 +304,7 @@ static void frame_handle_buffer(void *data,
     struct hyprland_toplevel_export_frame_v1 *frame,
     uint32_t format, uint32_t width, uint32_t height, uint32_t stride)
 {
+    (void)frame;
     AppCapture *self = APP_CAPTURE(data);
     self->format = format;
     self->width  = width;
@@ -288,8 +323,9 @@ static void frame_handle_buffer_done(void *data,
     AppCapture *self = APP_CAPTURE(data);
 
     if (self->width == 0 || self->height == 0 || self->stride == 0) {
-        g_warning("AppCapture: buffer_done with zero dimensions — aborting");
+        g_warning("AppCapture: buffer_done with zero dimensions");
         hyprland_toplevel_export_frame_v1_destroy(frame);
+        emit_frame_failed(self, "buffer_invalid");
         return;
     }
 
@@ -299,6 +335,7 @@ static void frame_handle_buffer_done(void *data,
     if (self->shm_fd < 0) {
         g_warning("AppCapture: memfd_create failed");
         hyprland_toplevel_export_frame_v1_destroy(frame);
+        emit_frame_failed(self, "alloc_failed");
         return;
     }
 
@@ -306,6 +343,7 @@ static void frame_handle_buffer_done(void *data,
         g_warning("AppCapture: ftruncate failed");
         cleanup_shm(self);
         hyprland_toplevel_export_frame_v1_destroy(frame);
+        emit_frame_failed(self, "alloc_failed");
         return;
     }
 
@@ -317,6 +355,7 @@ static void frame_handle_buffer_done(void *data,
         self->pixel_data = NULL;
         cleanup_shm(self);
         hyprland_toplevel_export_frame_v1_destroy(frame);
+        emit_frame_failed(self, "alloc_failed");
         return;
     }
 
@@ -345,6 +384,7 @@ static void frame_handle_ready(void *data,
     if (!self->pixel_data) {
         g_warning("AppCapture: ready fired but pixel_data is NULL");
         hyprland_toplevel_export_frame_v1_destroy(frame);
+        emit_frame_failed(self, "internal");
         return;
     }
 
@@ -364,6 +404,7 @@ static void frame_handle_failed(void *data,
     g_warning("AppCapture: frame capture failed");
     cleanup_shm(self);
     hyprland_toplevel_export_frame_v1_destroy(frame);
+    emit_frame_failed(self, "frame_failed");
 }
 
 static void frame_handle_damage(void *data,
@@ -380,6 +421,105 @@ static const struct hyprland_toplevel_export_frame_v1_listener frame_listener = 
     .failed       = frame_handle_failed,
     .damage       = frame_handle_damage,
 };
+
+/* =========================================================================
+ * Capture helpers
+ * ========================================================================= */
+
+static void emit_frame_failed(AppCapture *self, const char *reason)
+{
+    g_signal_emit(self, signals[SIGNAL_FRAME_FAILED], 0, reason);
+}
+
+static struct zwlr_foreign_toplevel_handle_v1 *find_wlr_handle(AppCapture *self,
+                                                               const char *addr)
+{
+    for (guint i = 0; i < self->toplevels->len; i++) {
+        ToplevelEntry *entry = g_ptr_array_index(self->toplevels, i);
+        if (entry->mapped && entry->wlr_handle &&
+            g_strcmp0(entry->address, addr) == 0)
+            return entry->wlr_handle;
+    }
+    return NULL;
+}
+
+static void do_capture(AppCapture *self,
+                       struct zwlr_foreign_toplevel_handle_v1 *wlr_handle)
+{
+    self->width = self->height = self->stride = self->format = 0;
+
+    struct hyprland_toplevel_export_frame_v1 *frame =
+        hyprland_toplevel_export_manager_v1_capture_toplevel_with_wlr_toplevel_handle(
+            self->export_manager,
+            0,           /* overlay_cursor */
+            wlr_handle
+        );
+
+    hyprland_toplevel_export_frame_v1_add_listener(frame, &frame_listener, self);
+    wl_display_flush(self->display);
+}
+
+/* =========================================================================
+ * Pending capture queue
+ *
+ * When capture_by_handle() is called for an address whose wlr handle hasn't
+ * been mapped yet (race between Hyprland IPC and wlr foreign-toplevel), we
+ * park a PendingCapture and wait for either:
+ *   - mapping_handle_window_address → flush_pending_for_address → do_capture
+ *   - PENDING_CAPTURE_TIMEOUT_MS elapses → emit frame-failed
+ *
+ * In practice the JS layer is single-flight so this queue holds ≤ 1 entry.
+ * ========================================================================= */
+
+static void pending_capture_free(gpointer data)
+{
+    PendingCapture *pc = data;
+    if (pc->timeout_id != 0) {
+        g_source_remove(pc->timeout_id);
+        pc->timeout_id = 0;
+    }
+    g_free(pc->address);
+    g_free(pc);
+}
+
+static gboolean pending_capture_timeout_cb(gpointer data)
+{
+    PendingCapture *pc   = data;
+    AppCapture     *self = pc->self;
+
+    g_warning("AppCapture: timeout waiting for wlr handle '%s' "
+              "(toplevel table has %u entries)",
+              pc->address, self->toplevels->len);
+
+    /* Mark consumed so pending_capture_free doesn't double-remove */
+    pc->timeout_id = 0;
+
+    /* Remove first (frees pc), THEN emit — emit may re-enter capture_by_handle */
+    g_ptr_array_remove(self->pending_captures, pc);
+    emit_frame_failed(self, "no_handle_timeout");
+    return G_SOURCE_REMOVE;
+}
+
+static void flush_pending_for_address(AppCapture *self, const char *address)
+{
+    if (self->pending_captures->len == 0) return;
+
+    struct zwlr_foreign_toplevel_handle_v1 *wlr_handle =
+        find_wlr_handle(self, address);
+    if (!wlr_handle) return;
+
+    /* Iterate backwards so removals don't shift indices we're about to visit */
+    for (guint i = self->pending_captures->len; i > 0; i--) {
+        PendingCapture *pc = g_ptr_array_index(self->pending_captures, i - 1);
+        if (g_strcmp0(pc->address, address) != 0) continue;
+
+        do_capture(self, wlr_handle);
+        g_ptr_array_remove_index(self->pending_captures, i - 1);
+        /* JS side is single-flight — at most one match expected.
+         * Break to avoid issuing two captures against the same shm state. */
+        break;
+    }
+}
 
 /* =========================================================================
  * SHM helpers
@@ -414,6 +554,7 @@ static void app_capture_finalize(GObject *object)
 {
     AppCapture *self = APP_CAPTURE(object);
     cleanup_shm(self);
+    g_ptr_array_unref(self->pending_captures);
     g_ptr_array_unref(self->toplevels);
     if (self->export_manager)
         hyprland_toplevel_export_manager_v1_destroy(self->export_manager);
@@ -441,14 +582,24 @@ static void app_capture_class_init(AppCaptureClass *klass)
         G_TYPE_NONE, 4,
         G_TYPE_BYTES, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT
     );
+
+    signals[SIGNAL_FRAME_FAILED] = g_signal_new(
+        "frame-failed",
+        G_TYPE_FROM_CLASS(klass),
+        G_SIGNAL_RUN_LAST,
+        0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1,
+        G_TYPE_STRING
+    );
 }
 
 static void app_capture_init(AppCapture *self)
 {
-    self->shm_fd     = -1;
-    self->pixel_data = NULL;
-    self->shm_size   = 0;
-    self->toplevels  = g_ptr_array_new_with_free_func(toplevel_entry_free);
+    self->shm_fd           = -1;
+    self->pixel_data       = NULL;
+    self->shm_size         = 0;
+    self->toplevels        = g_ptr_array_new_with_free_func(toplevel_entry_free);
+    self->pending_captures = g_ptr_array_new_with_free_func(pending_capture_free);
 
     GdkDisplay *gdk_display = gdk_display_get_default();
     self->display = gdk_wayland_display_get_wl_display(gdk_display);
@@ -485,17 +636,6 @@ AppCapture *app_capture_new(void)
     return g_object_new(APP_TYPE_CAPTURE, NULL);
 }
 
-/**
- * app_capture_capture_by_handle:
- * @self: an #AppCapture
- * @address: the Hyprland window address hex string WITHOUT "0x" prefix,
- *   as returned by AstalHyprland client.get_address() after stripping "0x".
- *   e.g. for "0x564f60266bd0" pass "564f60266bd0".
- *
- * Looks up the zwlr_foreign_toplevel_handle_v1 for this address and
- * requests a frame via capture_toplevel_with_wlr_toplevel_handle (v2).
- * The #AppCapture::frame-ready signal fires asynchronously.
- */
 void app_capture_capture_by_handle(AppCapture *self, const gchar *address)
 {
     g_return_if_fail(APP_IS_CAPTURE(self));
@@ -503,6 +643,7 @@ void app_capture_capture_by_handle(AppCapture *self, const gchar *address)
 
     if (!self->export_manager) {
         g_warning("AppCapture: export_manager not available");
+        emit_frame_failed(self, "no_export_manager");
         return;
     }
 
@@ -511,33 +652,21 @@ void app_capture_capture_by_handle(AppCapture *self, const gchar *address)
     if (g_str_has_prefix(addr, "0x") || g_str_has_prefix(addr, "0X"))
         addr += 2;
 
-    /* Find the wlr handle whose address matches */
-    struct zwlr_foreign_toplevel_handle_v1 *wlr_handle = NULL;
-    for (guint i = 0; i < self->toplevels->len; i++) {
-        ToplevelEntry *entry = g_ptr_array_index(self->toplevels, i);
-        if (entry->mapped && entry->wlr_handle &&
-            g_strcmp0(entry->address, addr) == 0)
-        {
-            wlr_handle = entry->wlr_handle;
-            break;
-        }
-    }
-
-    if (!wlr_handle) {
-        g_warning("AppCapture: no wlr handle found for address '%s' "
-                  "(table has %u entries)", addr, self->toplevels->len);
+    /* Fast path: handle already known and mapped */
+    struct zwlr_foreign_toplevel_handle_v1 *wlr_handle =
+        find_wlr_handle(self, addr);
+    if (wlr_handle) {
+        do_capture(self, wlr_handle);
         return;
     }
 
-    self->width = self->height = self->stride = self->format = 0;
-
-    struct hyprland_toplevel_export_frame_v1 *frame =
-        hyprland_toplevel_export_manager_v1_capture_toplevel_with_wlr_toplevel_handle(
-            self->export_manager,
-            0,           /* overlay_cursor */
-            wlr_handle
-        );
-
-    hyprland_toplevel_export_frame_v1_add_listener(frame, &frame_listener, self);
-    wl_display_flush(self->display);
+    /* Slow path: park and wait up to PENDING_CAPTURE_TIMEOUT_MS for the
+     * wlr_manager toplevel/mapping events to arrive. Race window is
+     * typically <100 ms in practice but can spike under load. */
+    PendingCapture *pc = g_new0(PendingCapture, 1);
+    pc->self       = self;
+    pc->address    = g_strdup(addr);
+    pc->timeout_id = g_timeout_add(PENDING_CAPTURE_TIMEOUT_MS,
+                                   pending_capture_timeout_cb, pc);
+    g_ptr_array_add(self->pending_captures, pc);
 }
