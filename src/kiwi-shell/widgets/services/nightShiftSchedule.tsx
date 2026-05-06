@@ -53,7 +53,7 @@ export default function nightShiftService() {
     subscribeChanged(conf.as(c => c.nightshift_start), updateNightShift);
     subscribeChanged(conf.as(c => c.nightshift_end), updateNightShift);
 
-    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
+    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
         updateNightShift();
         return GLib.SOURCE_CONTINUE;
     });
