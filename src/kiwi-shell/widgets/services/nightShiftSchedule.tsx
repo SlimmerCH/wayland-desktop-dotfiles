@@ -30,31 +30,54 @@ function subscribeChanged<T>(accessor: Accessor<T>, callback: () => void) {
     });
 }
 
-function updateNightShift() {
-    const config = conf();
+function enableNightShift() {
+    if (nightShift()) return;
+    execAsync(`hyprsunset -t ${conf().nightshift_intensity}`);
+    setNightShift(true);
+}
 
-    if (isWithinTimeframe(config.nightshift_start, config.nightshift_end) && config.auto_nightshift) {
-        if (!nightShift()) {
-            execAsync(`hyprsunset -t ${config.nightshift_intensity}`);
-            setNightShift(true);
-        }
-    } else {
-        if (nightShift()) {
-            execAsync("killall hyprsunset");
-            setNightShift(false);
-        }
-    }
+function disableNightShift() {
+    if (!nightShift()) return;
+    execAsync("killall hyprsunset");
+    setNightShift(false);
 }
 
 export default function nightShiftService() {
-    updateNightShift();
+    // null = unknown / needs sync (first run or auto just re-enabled)
+    let wasInTimeframe: boolean | null = null;
 
-    subscribeChanged(conf.as(c => c.auto_nightshift), updateNightShift);
-    subscribeChanged(conf.as(c => c.nightshift_start), updateNightShift);
-    subscribeChanged(conf.as(c => c.nightshift_end), updateNightShift);
+    function tick() {
+        const config = conf();
+
+        if (!config.auto_nightshift) {
+            wasInTimeframe = null;
+            return;
+        }
+
+        const inTimeframe = isWithinTimeframe(config.nightshift_start, config.nightshift_end);
+
+        if (wasInTimeframe === null) {
+            // first tick under auto — force sync to schedule
+            if (inTimeframe) enableNightShift();
+            else disableNightShift();
+        } else if (inTimeframe && !wasInTimeframe) {
+            enableNightShift();   // entered window
+        } else if (!inTimeframe && wasInTimeframe) {
+            disableNightShift();  // left window
+        }
+        // inTimeframe === wasInTimeframe → do nothing, respect manual toggle
+
+        wasInTimeframe = inTimeframe;
+    }
+
+    tick();
+
+    subscribeChanged(conf.as(c => c.auto_nightshift), tick);
+    subscribeChanged(conf.as(c => c.nightshift_start), tick);
+    subscribeChanged(conf.as(c => c.nightshift_end), tick);
 
     GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
-        updateNightShift();
+        tick();
         return GLib.SOURCE_CONTINUE;
     });
 }
