@@ -154,8 +154,9 @@ function PreferencesIcon() {
 }
 
 function networkIcon(wired, wifiState, activeAP) {
-    if (wired && wired.state === Network.Internet.ACTIVATED) {
-        return "am-network-symbolic"
+
+    if (wired && wired.state === 100) {
+        return "network-wired-activated-symbolic"
     }
     if (
         wifiState === Network.DeviceState.UNAVAILABLE ||

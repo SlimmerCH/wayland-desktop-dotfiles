@@ -138,7 +138,13 @@ function AccessPoint(ap) {
         <Gtk.Image
           class="networkIcon"
           pixelSize={16}
-          iconName={createBinding(ap, "strength").as((s) => wifiIcon(s))}
+          iconName={createComputed((get) => {
+            const strength = get(createBinding(ap, "strength"))
+            const isActive = get(isActiveBinding)
+            if (!isActive) return wifiIcon(strength)
+            const wiredState = network.wired ? get(createBinding(network.wired, "state")) : 0
+            return networkIcon(wiredState, strength)
+          })}
         />
         <label
           label={ap.ssid || "Hidden Network"}
@@ -155,6 +161,13 @@ function AccessPoint(ap) {
       </box>
     </button>
   )
+}
+
+function networkIcon(wiredState, strength) {
+    if (wiredState == 100) {
+      return "network-wired-activated-symbolic"
+    }
+    return wifiIcon(strength)
 }
 
 async function onNetworkClick(ssid: string, secured: boolean) {
