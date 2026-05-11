@@ -1,15 +1,34 @@
 import { Gtk } from "ags/gtk4"
 import GioUnix from "gi://GioUnix"
-import { classToEntry } from "./desktopEntries"
-import { Binding } from "ags";
+import { Binding } from "ags"
+import { classToEntry, titleMatchers } from "./desktopEntries"
 
+/**
+ * Resolves a Hyprland client to a .desktop entry ID.
+ *   1. Class lookup (covers StartupWMClass and .desktop file stems).
+ *   2. Title regex against entries declaring X-Kiwi-TitleMatch — for apps
+ *      whose class is generic, notably protontricks-launched games
+ *      which all share `steam_proton`.
+ *   3. Fallback: synthesize a .desktop name from the class.
+ */
 export function entryForClient(client: any): string {
-    const cls = client.get_class()
-    const clsLower = cls.toLowerCase()
-    
-    return classToEntry.get(clsLower)
-        ?? classToEntry.get(cls)
-        ?? (GioUnix.DesktopAppInfo.new(cls + ".desktop") ? cls + ".desktop" : clsLower + ".desktop")
+    const cls = (client["initial-class"] ?? "").toLowerCase()
+
+    const byClass = classToEntry.get(cls)
+    if (byClass) {
+        return byClass
+    }
+
+    const title = client["initial-title"] ?? client.title ?? ""
+    if (title) {
+        const matched = titleMatchers.find(m => m.regex.test(title))
+        if (matched) {
+            return matched.entry
+        }
+    }
+
+    const fallback = cls + ".desktop"
+    return fallback
 }
 
 export function iconForEntry(entry: string): string {

@@ -4,6 +4,7 @@ import { conf } from "../config"
 import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
 import { classToEntry as _classToEntry, entryToClass as _entryToClass, mapVersion } from "../desktopEntries"
+import { entryForClient } from "../appIcon"
 
 export const DOCK_HIDE_TIMEOUT = 300
 export const DOCK_HIDE_TIMEOUT_EDGE = 600
@@ -17,8 +18,6 @@ const ELECTRON_OVERRIDES: [string, string][] = [
 
 export const entryToClass = new Map([..._entryToClass, ...ELECTRON_OVERRIDES])
 
-// For classToEntry we look up the live map at call time, with electron overrides
-// as lowest priority so a more specific mapping from desktopEntries always wins.
 export function lookupEntry(cls: string): string | undefined {
     const fromMap = _classToEntry.get(cls)
     if (fromMap) return fromMap
@@ -61,15 +60,14 @@ export function isValidClient(client: any): boolean {
 }
 
 export const unpinnedList = createComputed(get => {
-    get(mapVersion) // reactive dependency — re-runs when classToEntry rebuilds
+    get(mapVersion) // reactive dependency — re-runs when maps rebuild
     const clients = get(createBinding(hyprland, "clients"))
     const pinned = new Set(get(list))
 
     const seen = new Set<string>()
     return clients.reduce((acc, client) => {
         if (!isValidClient(client)) return acc
-        const entry = lookupEntry(client["initial-class"].toLowerCase())
-            ?? (client["initial-class"] + ".desktop")
+        const entry = entryForClient(client)
         if (pinned.has(entry) || seen.has(entry)) return acc
         seen.add(entry)
         acc.push(entry)

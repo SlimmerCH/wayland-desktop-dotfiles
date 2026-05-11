@@ -22,11 +22,16 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     const [pinned, setPinned] = createState(list().includes(entry))
     const [jumping, setJumping] = createState(false)
 
+    const titleMatchRaw = application?.get_string("X-Kiwi-TitleMatch")
+    const titleMatch = titleMatchRaw ? new RegExp(titleMatchRaw, "i") : null
+
     const clientsBinding = createComputed(get => {
         const allClients = get(createBinding(hyprland, "clients"))
-        return allClients.filter(client =>
-            wmClasses.includes(client["initial-class"].toLowerCase())
-        )
+        return allClients.filter(client => {
+            const byClass = wmClasses.includes(client["initial-class"].toLowerCase())
+            const byTitle = titleMatch?.test(client["initial-title"]) ?? false
+            return byClass || byTitle
+        })
     })
 
     const onPinChange = (newPinned: boolean) => {

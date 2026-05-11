@@ -5,11 +5,13 @@ import { createState } from "ags"
 
 export const classToEntry = new Map<string, string>()
 export const entryToClass = new Map<string, string>()
+export const titleMatchers: Array<{ entry: string, regex: RegExp }> = []
 export const [mapVersion, setMapVersion] = createState(0)
 
 export function buildClassMap() {
     classToEntry.clear()
     entryToClass.clear()
+    titleMatchers.length = 0
 
     for (const appInfo of Gio.AppInfo.get_all() as GioUnix.DesktopAppInfo[]) {
         const id = appInfo.get_id()
@@ -29,9 +31,18 @@ export function buildClassMap() {
                 classToEntry.set(wmClassLower, id)
             }
         }
+
+        const titleMatchRaw = appInfo.get_string("X-Kiwi-TitleMatch")
+        if (titleMatchRaw) {
+            try {
+                titleMatchers.push({ entry: id, regex: new RegExp(titleMatchRaw, "i") })
+            } catch (e) {
+                console.error(`[ClassMap] Invalid X-Kiwi-TitleMatch in ${id}: ${titleMatchRaw}`, e)
+            }
+        }
     }
 
-    console.log(`[ClassMap] Built ${classToEntry.size} entries`)
+    console.log(`[ClassMap] Built ${classToEntry.size} class entries, ${titleMatchers.length} title matchers`)
     setMapVersion(v => v + 1)
 }
 
@@ -66,7 +77,7 @@ const dataDirs = [
     `${GLib.get_home_dir()}/.local/share/applications`,
     `/etc/profiles/per-user/${GLib.get_user_name()}/share/applications`,
     `/run/current-system/sw/share/applications`,
-    `/run/current-system`, // catches symlink swap on nixos-rebuild switch
+    `/run/current-system`,
 ]
 
 for (const dir of dataDirs) watchDir(dir)
