@@ -32,13 +32,23 @@ function subscribeChanged<T>(accessor: Accessor<T>, callback: () => void) {
 
 function enableNightShift() {
     if (nightShift()) return;
-    execAsync(`hyprsunset -t ${conf().nightshift_intensity}`);
+    try {
+        GLib.spawn_command_line_async(`hyprsunset -t ${conf().nightshift_intensity}`);
+    } catch (e) {
+        console.error("nightshift: failed to spawn hyprsunset:", e);
+        return;
+    }
     setNightShift(true);
 }
 
 function disableNightShift() {
     if (!nightShift()) return;
-    execAsync("killall hyprsunset");
+    try {
+        GLib.spawn_command_line_async("killall hyprsunset");
+    } catch (e) {
+        console.error("nightshift: failed to spawn killall:", e);
+        return;
+    }
     setNightShift(false);
 }
 
