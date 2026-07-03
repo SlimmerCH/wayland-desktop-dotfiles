@@ -44,7 +44,7 @@ export function closeNc() {
     ncCloseTimer = setTimeout(() => {
         ncCloseTimer = null
         setNcClosing(false)
-    }, NC_SLIDE_MS + 300)
+    }, NC_SLIDE_MS + 600)
 }
 
 export function toggleNc() {
@@ -235,10 +235,50 @@ function formatRelativeTime(time: number, now: number): string {
     return GLib.DateTime.new_from_unix_local(time)?.format("%b %e") ?? ""
 }
 
-export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
+// Transparent fullscreen window that maps only while the center is open. It
+// sits on a lower layer than the content window, so any click it receives is
+// by construction outside the panel — no geometry math needed. Keeping the
+// backdrop separate means the content window's surface is NEVER reconfigured
+// (no anchor/keymode churn), which caused resize glitches and lost frames.
+function NcBackdrop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const { TOP, RIGHT, BOTTOM, LEFT } = Astal.WindowAnchor
+    return (
+        <window
+            name="ags-nc-backdrop"
+            class="nc-backdrop"
+            gdkmonitor={gdkmonitor}
+            visible={ncOpen}
+            exclusivity={Astal.Exclusivity.NORMAL}
+            anchor={TOP | RIGHT | BOTTOM | LEFT}
+            keymode={ncOpen.as(open => open ? Astal.Keymode.ON_DEMAND : Astal.Keymode.NONE)}
+            application={app}
+            layer={Astal.Layer.TOP}
+            $={(self) => {
+                const click = new Gtk.GestureClick()
+                click.set_button(0)
+                click.connect("pressed", () => closeNc())
+                self.add_controller(click)
 
-    let panelRef: Gtk.Widget | null = null
+                const key = new Gtk.EventControllerKey()
+                key.connect("key-pressed", (_controller, keyval) => {
+                    if (keyval === Gdk.KEY_Escape) {
+                        closeNc()
+                        return true
+                    }
+                    return false
+                })
+                self.add_controller(key)
+
+                onCleanup(() => self.destroy())
+            }}
+        >
+            <box />
+        </window>
+    )
+}
+
+export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
+    const { TOP, RIGHT } = Astal.WindowAnchor
 
     // Scroll once the list would leave the viewport: cap the scrolled window at
     // monitor height minus the bar and, when it reserves space, the dock.
@@ -247,7 +287,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
         return Math.max(200, gdkmonitor.get_geometry().height - 48 - dockAllowance)
     })
 
-    return (
+    return [(
         <window
             css={conf.as(conf => `--primary: ${conf.primary_color};`)}
             visible={createComputed(get => get(ncShown) || (get(anyBanner) && !get(dnd)))}
@@ -255,10 +295,9 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             class={conf.as(conf => `Notifications theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
             exclusivity={Astal.Exclusivity.NORMAL}
-            anchor={ncShown.as(shown => shown ? TOP | RIGHT | BOTTOM | LEFT : TOP | RIGHT)}
-            keymode={ncOpen.as(open => open ? Astal.Keymode.ON_DEMAND : Astal.Keymode.NONE)}
+            anchor={TOP | RIGHT}
             application={app}
-            layer={Astal.Layer.TOP}
+            layer={Astal.Layer.OVERLAY}
             $={(self) => {
                 const shrinkToFit = () => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
@@ -270,32 +309,8 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 const unsub = notifState.subscribe(shrinkToFit)
                 const unsubResize = resizeTick.subscribe(shrinkToFit)
 
-                // backdrop: any click outside the panel closes the center
-                const click = new Gtk.GestureClick()
-                click.set_button(0)
-                click.connect("released", (_gesture, _nPress, x, y) => {
-                    if (!ncOpen() || !panelRef) return
-                    const [ok, bounds] = panelRef.compute_bounds(self)
-                    if (!ok) return
-                    const inside =
-                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
-                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
-                    if (!inside) closeNc()
-                })
-                self.add_controller(click)
-
-                const key = new Gtk.EventControllerKey()
-                key.connect("key-pressed", (_controller, keyval) => {
-                    if (keyval === Gdk.KEY_Escape && ncOpen()) {
-                        closeNc()
-                        return true
-                    }
-                    return false
-                })
-                self.add_controller(key)
-
-                // while sliding out, the still-fullscreen backdrop should not
-                // eat clicks anymore — make it click-through
+                // while the cards slide out, the window still covers their old
+                // spot — make it click-through until it unmaps
                 const updateInputRegion = () => {
                     const surface = self.get_surface()
                     if (!surface) return
@@ -344,7 +359,6 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 maxContentHeight={maxListHeight}
                 halign={Gtk.Align.END}
                 valign={Gtk.Align.START}
-                $={(self) => { panelRef = self }}
             >
             <box class="notifications" orientation={Gtk.Orientation.VERTICAL} spacing={2}>
                 <box
@@ -414,7 +428,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             </box>
             </scrolledwindow>
         </window>
-    )
+    ), <NcBackdrop gdkmonitor={gdkmonitor} />]
 }
 
 function Notification({ n }: { n: Notifd.Notification }) {
