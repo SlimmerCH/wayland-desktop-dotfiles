@@ -1,10 +1,11 @@
 import { Gtk } from "ags/gtk4"
 import AstalBluetooth from "gi://AstalBluetooth"
 import GLib from "gi://GLib"
-import { createBinding, createComputed, createState, For } from "ags"
+import { createBinding, createComputed, createState } from "ags"
 import { exec } from "ags/process"
 
 import { Icon, BluetoothDeviceIcon } from "../../../iconNames"
+import { KeyedList } from "../../../KeyedList"
 import { bluetoothTabOpen } from "../SystemMenu"
 
 function hasBluetoothAdapter(): boolean {
@@ -35,6 +36,12 @@ adapter?.connect("notify::powered", () => {
 
 const bluetoothEnabledRaw = adapter ? createBinding(adapter, "powered") : null
 const devicesBinding = bluetooth ? createBinding(bluetooth, "devices") : null
+
+// A device's address is stable while names resolve during discovery; keying on
+// it lets KeyedList keep existing rows untouched (For re-appends every child on
+// each list emission, which drops hover state and flickers).
+const deviceKey = (device: AstalBluetooth.Device) =>
+  device.address ?? device.get_object_path?.() ?? String(device)
 
 const [btFrozen, setBtFrozen] = createState(false)
 const [btFrozenValue, setBtFrozenValue] = createState(adapter?.powered ?? false)
@@ -87,9 +94,13 @@ export default function BluetoothTab({ visible }) {
         vexpand={true}
       >
         {devicesBinding && (
-          <For each={devicesBinding}>
-            {(device) => <Device device={device} paired={true} />}
-          </For>
+          <KeyedList
+            each={devicesBinding}
+            keyFn={deviceKey}
+            orientation={Gtk.Orientation.VERTICAL}
+            spacing={4}
+            children={(device) => <Device device={device} paired={true} />}
+          />
         )}
       </box>
 
@@ -105,9 +116,13 @@ export default function BluetoothTab({ visible }) {
         vexpand={true}
       >
         {devicesBinding && (
-          <For each={devicesBinding}>
-            {(device) => <Device device={device} paired={false} />}
-          </For>
+          <KeyedList
+            each={devicesBinding}
+            keyFn={deviceKey}
+            orientation={Gtk.Orientation.VERTICAL}
+            spacing={4}
+            children={(device) => <Device device={device} paired={false} />}
+          />
         )}
       </box>
     </box>
@@ -128,6 +143,8 @@ function Device({ device, paired }) {
 
   const hasIcon = iconBinding.as((s) => !!s)
 
+  const menu = DeviceContextMenu(device, connectedBinding, pairedBinding)
+
   return (
     <button
       visible={visibility}
@@ -137,15 +154,24 @@ function Device({ device, paired }) {
       onClicked={() => {
         handleDeviceClick(device)
       }}
+      $={(self) => {
+        const gesture = new Gtk.GestureClick()
+        gesture.set_button(3)
+        gesture.connect("released", () => {
+          menu.popup()
+        })
+        self.add_controller(gesture)
+      }}
     >
       <box spacing={6}>
+        {menu}
         <Icon
           pixelSize={16}
           visible={hasIcon}
           iconName={iconBinding.as((s) => BluetoothDeviceIcon(s))}
         />
         <label
-          label={device.name || "Unkown Device"}
+          label={deviceName.as((n) => n || "Unknown Device")}
           hexpand={true}
           halign={Gtk.Align.START}
         />
@@ -155,44 +181,94 @@ function Device({ device, paired }) {
   )
 }
 
+function DeviceContextMenu(device, connectedBinding, pairedBinding) {
+  let popover: Gtk.Popover
+
+  const item = (label: string, icon: string, onClicked: () => void, visible) => (
+    <button
+      visible={visible}
+      onClicked={() => {
+        popover.popdown()
+        onClicked()
+      }}
+    >
+      <box>
+        <Icon class="dock-context-icon" iconName={icon} pixelSize={20} />
+        <label halign={Gtk.Align.START} label={label} />
+      </box>
+    </button>
+  )
+
+  return (
+    <popover
+      autohide={true}
+      class="app-context-menu bt-context-menu"
+      $={(self) => {
+        popover = self
+      }}
+    >
+      <box orientation={Gtk.Orientation.VERTICAL} spacing={3}>
+        {item("Connect", "bluetooth-active-symbolic", () => connectDevice(device),
+          createComputed((get) => get(pairedBinding) && !get(connectedBinding)))}
+        {item("Pair & Connect", "bluetooth-active-symbolic", () => pairDevice(device),
+          pairedBinding.as((p) => !p))}
+        {item("Disconnect", "bluetooth-disabled-symbolic", () => disconnectDevice(device),
+          connectedBinding)}
+        {item("Forget Device", "user-trash-symbolic", () => forgetDevice(device),
+          pairedBinding)}
+      </box>
+    </popover>
+  )
+}
+
+function connectDevice(device) {
+  console.log("Connecting to", device.name)
+  device.connect_device((source, result) => {
+    try {
+      device.connect_device_finish(result)
+      console.log("Connected successfully!")
+    } catch (err) {
+      console.error("Connect failed:", err)
+    }
+  })
+}
+
+function disconnectDevice(device) {
+  console.log("Disconnecting from", device.name)
+  device.disconnect_device((source, result) => {
+    try {
+      device.disconnect_device_finish(result)
+      console.log("Disconnected successfully!")
+    } catch (err) {
+      console.error("Disconnect failed:", err)
+    }
+  })
+}
+
+function pairDevice(device) {
+  console.log("Pairing with", device.name)
+  device.pair()
+  device.trusted = true
+  connectDevice(device)
+}
+
+function forgetDevice(device) {
+  try {
+    console.log("Removing device", device.name)
+    adapter?.remove_device(device)
+  } catch (error) {
+    console.error("Failed to remove device:", error)
+  }
+}
+
 async function handleDeviceClick(device) {
   try {
     if (!device.paired) {
-      console.log("Pairing with", device.name)
-      device.pair()
-
-      console.log("Trusting", device.name)
-      device.trusted = true
-
-      console.log("Connecting to", device.name)
-      device.connect_device((source, result) => {
-        try {
-          device.connect_device_finish(result)
-          console.log("Connected successfully!")
-        } catch (err) {
-          console.error("Connect failed:", err)
-        }
-      })
+      pairDevice(device)
     } else if (!device.connected) {
-      console.log("Connecting to", device.name)
-      device.connect_device((source, result) => {
-        try {
-          device.connect_device_finish(result)
-          console.log("Connected successfully!")
-        } catch (err) {
-          console.error("Connect failed:", err)
-        }
-      })
+      connectDevice(device)
     } else {
-      console.log("Disconnecting from", device.name)
-      device.disconnect_device((source, result) => {
-        try {
-          device.disconnect_device_finish(result)
-          console.log("Disconnected successfully!")
-        } catch (err) {
-          console.error("Disconnect failed:", err)
-        }
-      })
+      disconnectDevice(device)
     }
   } catch (error) {
     console.error("Bluetooth operation failed:", error)

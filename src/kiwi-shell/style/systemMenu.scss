@@ -160,6 +160,10 @@
     background: none;
     box-shadow: none;
     border: none;
+    border-radius: 8px;
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
     &.active {
       color: #fff;
     }
