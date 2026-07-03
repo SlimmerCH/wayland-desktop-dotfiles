@@ -8,6 +8,8 @@ export function KeyedList<T>({
     enterClass,
     enterDuration = 700,
     shouldEnter,
+    exitClass,
+    exitDuration = 500,
     appendOnly,
     orientation = Gtk.Orientation.HORIZONTAL,
     spacing = 0,
@@ -18,6 +20,8 @@ export function KeyedList<T>({
     enterClass?: string
     enterDuration?: number
     shouldEnter?: (item: T) => boolean
+    exitClass?: string
+    exitDuration?: number
     appendOnly?: boolean
     orientation?: Gtk.Orientation
     spacing?: number
@@ -29,8 +33,17 @@ export function KeyedList<T>({
             $={(self: Gtk.Box) => {
                 const widgetMap = new Map<string, Gtk.Widget>()
                 const disposeMap = new Map<string, () => void>()
+                const exiting = new Map<string, ReturnType<typeof setTimeout>>()
                 let prevKeys: string[] = []
                 let initialized = false
+
+                const removeNow = (k: string) => {
+                    const w = widgetMap.get(k)
+                    if (w && w.get_parent() === self) self.remove(w)
+                    disposeMap.get(k)?.()
+                    disposeMap.delete(k)
+                    widgetMap.delete(k)
+                }
 
                 const sync = (items: T[]) => {
                     if (!items) return
@@ -38,14 +51,22 @@ export function KeyedList<T>({
                     const nextKeys = items.map(keyFn)
                     const nextKeySet = new Set(nextKeys)
 
-                    // 1. Remove widgets whose entries disappeared
+                    // 1. Remove widgets whose entries disappeared. With exitClass the
+                    //    widget stays around playing its exit animation first.
                     for (const k of prevKeys) {
-                        if (!nextKeySet.has(k)) {
-                            const w = widgetMap.get(k)!
-                            self.remove(w)
-                            disposeMap.get(k)?.()
-                            disposeMap.delete(k)
-                            widgetMap.delete(k)
+                        if (!nextKeySet.has(k) && !exiting.has(k)) {
+                            if (exitClass && initialized) {
+                                const w = widgetMap.get(k)!
+                                if (enterClass) w.remove_css_class(enterClass)
+                                w.remove_css_class("shown")
+                                w.add_css_class(exitClass)
+                                exiting.set(k, setTimeout(() => {
+                                    exiting.delete(k)
+                                    removeNow(k)
+                                }, exitDuration))
+                            } else {
+                                removeNow(k)
+                            }
                         }
                     }
 
@@ -53,6 +74,15 @@ export function KeyedList<T>({
                     //    onCleanup / createState inside children have a tracking context.
                     for (const item of items) {
                         const k = keyFn(item)
+                        // re-added while playing its exit animation: revive the widget
+                        const exitTimer = exiting.get(k)
+                        if (exitTimer !== undefined) {
+                            clearTimeout(exitTimer)
+                            exiting.delete(k)
+                            const w = widgetMap.get(k)!
+                            if (exitClass) w.remove_css_class(exitClass)
+                            w.add_css_class("shown")
+                        }
                         if (!widgetMap.has(k)) {
                             createRoot(dispose => {
                                 const w = children(item)
@@ -106,6 +136,8 @@ export function KeyedList<T>({
 
                 onCleanup(() => {
                     unsub()
+                    for (const timer of exiting.values()) clearTimeout(timer)
+                    exiting.clear()
                     for (const dispose of disposeMap.values()) dispose()
                     disposeMap.clear()
                     widgetMap.clear()

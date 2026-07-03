@@ -163,6 +163,16 @@ $slide-margin: calc(var(--icon-size) / 2 * -1);
     100% { transform: translateY(0); opacity: 1;}
 }
 
+// reverse of grow-h, for icons whose application closed
+@keyframes shrink-h {
+    0%   { transform: translateY(0) scaleX(1); opacity: 1; margin: 0; }
+    100% {
+        transform: translateY(80px) scaleX(0); opacity: 0;
+        margin-left: -25px;
+        margin-right: -25px;
+    }
+}
+
 @keyframes emerge {
     0%   { transform: scaleY(0); opacity: 0.5;}
     100% { transform: scaleY(1); opacity: 1;}
@@ -190,8 +200,12 @@ $jumptime: var(--jumptime);
 .fade-in {
     animation: icon-slide 650ms ease forwards;
     &:not(.reserved) {
-        animation: grow-h 550ms ease forwards;        
+        animation: grow-h 550ms ease forwards;
     }
+}
+
+.fade-out {
+    animation: shrink-h 450ms ease forwards;
 }
 
 

@@ -451,6 +451,7 @@ function DockBar({ setMenuOpen, showDock, onDockBoxReady }: {
                             each={unpinnedBinding}
                             keyFn={(entry) => entry}
                             enterClass="fade-in"
+                            exitClass="fade-out"
                             shouldEnter={(entry) => !prevPinnedSnapshot.has(entry)}
                             children={(entry) => {
                                 const index = createComputed(get =>
