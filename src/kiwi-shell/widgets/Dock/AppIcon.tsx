@@ -28,8 +28,9 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     const clientsBinding = createComputed(get => {
         const allClients = get(createBinding(hyprland, "clients"))
         return allClients.filter(client => {
-            const byClass = wmClasses.includes(client["initial-class"].toLowerCase())
-            const byTitle = titleMatch?.test(client["initial-title"]) ?? false
+            // both properties can be null while a client is being created
+            const byClass = wmClasses.includes((client["initial-class"] ?? "").toLowerCase())
+            const byTitle = titleMatch?.test(client["initial-title"] ?? "") ?? false
             return byClass || byTitle
         })
     })
