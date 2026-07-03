@@ -195,19 +195,23 @@ notifd.connect("resolved", (_, id) => {
     })
 })
 
-const activeNotifs = createComputed(get =>
-    [...get(notifState).entries()]
-        .filter(([, p]) => p === "active" || p === "closing")
-        .map(([id]) => notifd.get_notification(id))
+// One unified list: banners and center entries are the same widgets, so
+// opening the center never recreates or moves cards (no visual glitches) —
+// per-card visibility just changes with the phase and center state.
+const allNotifs = createComputed(get =>
+    [...get(notifState).keys()]
+        .map(id => notifd.get_notification(id))
         .filter(Boolean) as Notifd.Notification[]
 )
 
-const expiredNotifs = createComputed(get =>
-    [...get(notifState).entries()]
-        .filter(([, p]) => p === "expired")
-        .map(([id]) => notifd.get_notification(id))
-        .filter(Boolean) as Notifd.Notification[]
+const anyBanner = createComputed(get =>
+    [...get(notifState).values()].some(p => p !== "expired")
 )
+
+const dnd = createBinding(notifd, "dont-disturb")
+
+// the window stays alive while the center is open or flying out
+const ncShown = createComputed(get => get(ncOpen) || get(ncClosing))
 
 // bumped whenever a card changes size on its own (e.g. body expand/collapse)
 // so the window can shrink back to its natural size
@@ -234,18 +238,6 @@ function formatRelativeTime(time: number, now: number): string {
 export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const { TOP, RIGHT, BOTTOM, LEFT } = Astal.WindowAnchor
 
-    const dnd = createBinding(notifd, "dont-disturb")
-
-    const showActive = createComputed(get =>
-        get(activeNotifs).length > 0 && (get(ncOpen) || !get(dnd))
-    )
-
-    // While the center is open (or flying out) the window covers the whole
-    // usable screen: the transparent area acts as a backdrop so a click
-    // anywhere else closes it (input is released the moment closing starts via
-    // the input region below). With banners only, it hugs the top-right corner.
-    const ncShown = createComputed(get => get(ncOpen) || get(ncClosing))
-
     let panelRef: Gtk.Widget | null = null
 
     // Scroll once the list would leave the viewport: cap the scrolled window at
@@ -258,7 +250,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
     return (
         <window
             css={conf.as(conf => `--primary: ${conf.primary_color};`)}
-            visible={createComputed(get => get(showActive) || get(ncOpen) || get(ncClosing))}
+            visible={createComputed(get => get(ncShown) || (get(anyBanner) && !get(dnd)))}
             name="ags-notification-center"
             class={conf.as(conf => `Notifications theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
@@ -316,7 +308,26 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 const unsubOpen = ncOpen.subscribe(updateInputRegion)
                 const unsubClosing = ncClosing.subscribe(updateInputRegion)
 
+                // Damage heartbeat while flying out: if the compositor stops
+                // sending frame callbacks (nothing "changed" from its POV), the
+                // GTK frame clock stalls and CSS transitions freeze mid-flight.
+                // Forcing a redraw from a plain GLib timer keeps frames coming.
+                let heartbeat: number | null = null
+                const unsubHeartbeat = ncClosing.subscribe(() => {
+                    if (!ncClosing() || heartbeat !== null) return
+                    heartbeat = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 33, () => {
+                        if (!ncClosing()) {
+                            heartbeat = null
+                            return GLib.SOURCE_REMOVE
+                        }
+                        self.queue_draw()
+                        return GLib.SOURCE_CONTINUE
+                    })
+                })
+
                 onCleanup(() => {
+                    unsubHeartbeat()
+                    if (heartbeat !== null) GLib.source_remove(heartbeat)
                     unsub()
                     unsubResize()
                     unsubOpen()
@@ -337,56 +348,42 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             >
             <box class="notifications" orientation={Gtk.Orientation.VERTICAL} spacing={2}>
                 <box
-                    class="active-notifications"
                     orientation={Gtk.Orientation.VERTICAL}
-                    spacing={2}
-                    visible={showActive}
+                    class="no-notifications"
+                    halign={Gtk.Align.CENTER}
+                    visible={createComputed(get => get(ncOpen) && get(notifState).size === 0)}
                 >
-                    <For each={activeNotifs}>
-                        {(n) => <Notification n={n} />}
-                    </For>
+                    <Gtk.Image
+                        iconName="notification-alert-symbolic"
+                        pixelSize={32}
+                        class="no-notifications-icon"
+                    />
+                    <box class="no-notifications-text" halign={Gtk.Align.CENTER}>
+                        No notifications
+                    </box>
                 </box>
-                <box
-                    class="expired-notifications nc-panel slide-out"
-                    orientation={Gtk.Orientation.VERTICAL}
-                    spacing={2}
-                    visible={ncShown}
+                <revealer
+                    transitionType={Gtk.RevealerTransitionType.SLIDE_DOWN}
+                    transitionDuration={NC_SLIDE_MS}
+                    revealChild={false}
+                    visible={createComputed(get => get(ncShown) && get(notifState).size > 0)}
                     $={(self) => {
-                        // plain CSS transform slide (like the dock): the viewport
-                        // clips the panel, so translating it moves it out of view.
-                        // Slide in one idle-tick after mapping, otherwise the
-                        // transition is skipped and the panel just pops in.
+                        // the header slides down into place, pushing any banners
+                        // below it down with it
                         const unsub = ncOpen.subscribe(() => {
                             if (ncOpen()) {
                                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                                    // re-check: the toggle may have been spammed
-                                    // before this idle ran
-                                    if (ncOpen()) self.remove_css_class("slide-out")
+                                    if (ncOpen()) self.set_reveal_child(true)
                                     return GLib.SOURCE_REMOVE
                                 })
                             } else {
-                                self.add_css_class("slide-out")
+                                self.set_reveal_child(false)
                             }
                         })
                         onCleanup(unsub)
                     }}
                 >
-                    <box
-                        orientation={Gtk.Orientation.VERTICAL}
-                        class="no-notifications"
-                        halign={Gtk.Align.CENTER}
-                        visible={notifState(m => m.size === 0)}
-                    >
-                        <Gtk.Image
-                            iconName="notification-alert-symbolic"
-                            pixelSize={32}
-                            class="no-notifications-icon"
-                        />
-                        <box class="no-notifications-text" halign={Gtk.Align.CENTER}>
-                            No notifications
-                        </box>
-                    </box>
-                    <box class="nc-header" visible={expiredNotifs(l => l.length > 0)}>
+                    <box class="nc-header">
                         <label class="nc-title" label="Notifications" hexpand xalign={0} />
                         <button class="clear-all-button" onClicked={clearHistory}>
                             <box spacing={4}>
@@ -395,11 +392,11 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                             </box>
                         </button>
                     </box>
-                    <box orientation={Gtk.Orientation.VERTICAL} spacing={2}>
-                        <For each={expiredNotifs}>
-                            {(n) => <Notification n={n} />}
-                        </For>
-                    </box>
+                </revealer>
+                <box orientation={Gtk.Orientation.VERTICAL} spacing={2}>
+                    <For each={allNotifs}>
+                        {(n) => <Notification n={n} />}
+                    </For>
                 </box>
             </box>
             </scrolledwindow>
@@ -439,11 +436,21 @@ function Notification({ n }: { n: Notifd.Notification }) {
         n.dismiss()
     }
 
+    // banners are visible unless dnd hides them; center entries only while the
+    // center is open or flying out
+    const cardVisible = createComputed(get => {
+        const p = get(phase)
+        if (p === undefined) return false
+        if (p === "expired") return get(ncShown)
+        return get(ncOpen) || !get(dnd)
+    })
+
     return (
         <revealer
             transitionType={Gtk.RevealerTransitionType.SLIDE_DOWN}
             transitionDuration={EXIT_COLLAPSE_MS}
             revealChild={!isNew}
+            visible={cardVisible}
             $={(self) => {
                 if (isNew) {
                     // start collapsed so neighbors get pushed smoothly, then reveal
@@ -452,20 +459,40 @@ function Notification({ n }: { n: Notifd.Notification }) {
                         return GLib.SOURCE_REMOVE
                     })
                 }
-                const unsub = phase.subscribe(() => {
-                    if (phase() === "closing") {
-                        wrap?.add_css_class("offscreen")
+
+                // Single slide driver for every card state. Sliding in is
+                // deferred one idle so a freshly-mapped card still transitions.
+                const applySlide = () => {
+                    if (!wrap) return
+                    const p = notifState().get(n.id)
+                    if (p === "closing") {
+                        wrap.add_css_class("offscreen")
                         setTimeout(() => {
                             if (notifState().get(n.id) === "closing")
                                 self.set_reveal_child(false)
                         }, EXIT_SLIDE_MS)
-                    } else if (phase() === "active") {
-                        // replaced while closing: bring it back
-                        wrap?.remove_css_class("offscreen")
-                        self.set_reveal_child(true)
+                    } else if (p === "expired" && !ncOpen()) {
+                        // parked offscreen, ready to slide in when the center opens
+                        wrap.add_css_class("offscreen")
+                    } else if (p === "active" || p === "expired") {
+                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                            const cur = notifState().get(n.id)
+                            const shouldShow = cur === "active" ||
+                                (cur === "expired" && ncOpen())
+                            if (shouldShow && wrap) {
+                                wrap.remove_css_class("offscreen")
+                                self.set_reveal_child(true)
+                            }
+                            return GLib.SOURCE_REMOVE
+                        })
                     }
+                }
+                const unsubPhase = phase.subscribe(applySlide)
+                const unsubOpen = ncOpen.subscribe(applySlide)
+                onCleanup(() => {
+                    unsubPhase()
+                    unsubOpen()
                 })
-                onCleanup(unsub)
             }}
         >
             <overlay
@@ -476,12 +503,16 @@ function Notification({ n }: { n: Notifd.Notification }) {
                     // state instead of a CSS animation: transitions only run on
                     // state changes, so a surface remap (e.g. the center's
                     // anchor flip) can never replay them
-                    if (isNew) {
+                    const p = notifState().get(n.id)
+                    if (isNew || (p === "expired" && !ncOpen())) {
                         self.add_css_class("offscreen")
+                    }
+                    if (isNew) {
                         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                            if (notifState().get(n.id) !== "closing") {
-                                self.remove_css_class("offscreen")
-                            }
+                            const cur = notifState().get(n.id)
+                            const shouldShow = cur === "active" ||
+                                (cur === "expired" && ncOpen())
+                            if (shouldShow) self.remove_css_class("offscreen")
                             return GLib.SOURCE_REMOVE
                         })
                     }
