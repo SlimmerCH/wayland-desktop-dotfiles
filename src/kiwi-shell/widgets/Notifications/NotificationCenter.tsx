@@ -368,22 +368,35 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                     revealChild={false}
                     visible={createComputed(get => get(ncShown) && get(notifState).size > 0)}
                     $={(self) => {
-                        // the header slides down into place, pushing any banners
-                        // below it down with it
+                        // The revealer only animates the *space*: banners slide
+                        // down on open, the whole center slides back up on close.
+                        // The title itself never moves vertically — it stays
+                        // horizontally offscreen and slides in from the right
+                        // once its slot has mostly grown.
+                        let headerBox: Gtk.Widget | null =
+                            (self as Gtk.Revealer).get_child?.() ?? null
                         const unsub = ncOpen.subscribe(() => {
+                            headerBox ??= (self as Gtk.Revealer).get_child?.() ?? null
                             if (ncOpen()) {
                                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                                    if (ncOpen()) self.set_reveal_child(true)
+                                    if (!ncOpen()) return GLib.SOURCE_REMOVE
+                                    self.set_reveal_child(true)
+                                    setTimeout(() => {
+                                        if (ncOpen()) headerBox?.remove_css_class("offscreen")
+                                    }, 120)
                                     return GLib.SOURCE_REMOVE
                                 })
                             } else {
-                                self.set_reveal_child(false)
+                                headerBox?.add_css_class("offscreen")
+                                setTimeout(() => {
+                                    if (!ncOpen()) self.set_reveal_child(false)
+                                }, 100)
                             }
                         })
                         onCleanup(unsub)
                     }}
                 >
-                    <box class="nc-header">
+                    <box class="nc-header offscreen">
                         <label class="nc-title" label="Notifications" hexpand xalign={0} />
                         <button class="clear-all-button" onClicked={clearHistory}>
                             <box spacing={4}>
