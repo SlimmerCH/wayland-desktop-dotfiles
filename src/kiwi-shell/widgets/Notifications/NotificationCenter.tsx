@@ -277,7 +277,19 @@ function Notification({ n }: { n: Notifd.Notification }) {
     const { icon, image } = notifVisuals(n)
     const actionButtons = (n.actions ?? []).filter(a => a.id !== "default")
 
-    let card: Gtk.Widget | null = null
+    let wrap: Gtk.Widget | null = null
+
+    // macOS behavior: clicking opens the source (default action if the app
+    // provides one, otherwise focus its window) and the notification is gone
+    // for good, including from the center.
+    const activate = () => {
+        if ((n.actions ?? []).some(a => a.id === "default")) {
+            n.invoke("default")
+        } else {
+            focusApp(n)
+        }
+        n.dismiss()
+    }
 
     return (
         <revealer
@@ -294,47 +306,53 @@ function Notification({ n }: { n: Notifd.Notification }) {
                 }
                 const unsub = phase.subscribe(() => {
                     if (phase() === "closing") {
-                        card?.add_css_class("slide-out")
+                        wrap?.add_css_class("slide-out")
                         setTimeout(() => {
                             if (notifState().get(n.id) === "closing")
                                 self.set_reveal_child(false)
                         }, EXIT_SLIDE_MS)
                     } else if (phase() === "active") {
                         // replaced while closing: bring it back
-                        card?.remove_css_class("slide-out")
+                        wrap?.remove_css_class("slide-out")
                         self.set_reveal_child(true)
                     }
                 })
                 onCleanup(unsub)
             }}
         >
-            <button
-                class="notification"
-                widthRequest={NOTIF_WIDTH}
+            <overlay
+                class="notification-wrap"
                 $={(self) => {
-                    card = self
+                    wrap = self
                     if (isNew) {
                         self.add_css_class("slide-in")
                         timeout(ENTER_MS, () => self.remove_css_class("slide-in"))
                     }
-                    if (n.urgency === Notifd.Urgency.CRITICAL) {
-                        self.add_css_class("critical")
-                    }
-                }}
-                onClicked={() => {
-                    // macOS behavior: clicking opens the source (default action if
-                    // the app provides one, otherwise focus its window) and the
-                    // notification is gone for good, including from the center.
-                    if ((n.actions ?? []).some(a => a.id === "default")) {
-                        n.invoke("default")
-                    } else {
-                        focusApp(n)
-                    }
-                    n.dismiss()
                 }}
             >
-                <overlay>
-                    <box class="notification-content" spacing={10}>
+                <box
+                    class="notification"
+                    widthRequest={NOTIF_WIDTH}
+                    $={(self) => {
+                        if (n.urgency === Notifd.Urgency.CRITICAL) {
+                            self.add_css_class("critical")
+                        }
+                        // a plain gesture instead of a button: clicks on nested
+                        // buttons/links must not fall through to the card action
+                        const click = new Gtk.GestureClick()
+                        click.set_button(1)
+                        click.connect("released", (_gesture, _nPress, x, y) => {
+                            const target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+                            for (let w: Gtk.Widget | null = target; w && w !== self; w = w.get_parent()) {
+                                if (w instanceof Gtk.Button) return
+                                if (w instanceof Gtk.Label && w.get_current_uri()) return
+                            }
+                            activate()
+                        })
+                        self.add_controller(click)
+                    }}
+                >
+                    <box class="notification-content" spacing={10} hexpand>
                         {icon}
                         <box orientation={Gtk.Orientation.VERTICAL} hexpand valign={Gtk.Align.CENTER}>
                             <box class="header" spacing={6}>
@@ -399,17 +417,17 @@ function Notification({ n }: { n: Notifd.Notification }) {
                         </box>
                         {image}
                     </box>
-                    <button
-                        $type="overlay"
-                        class="close-button"
-                        halign={Gtk.Align.START}
-                        valign={Gtk.Align.START}
-                        onClicked={() => n.dismiss()}
-                    >
-                        <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
-                    </button>
-                </overlay>
-            </button>
+                </box>
+                <button
+                    $type="overlay"
+                    class="close-button"
+                    halign={Gtk.Align.START}
+                    valign={Gtk.Align.START}
+                    onClicked={() => n.dismiss()}
+                >
+                    <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
+                </button>
+            </overlay>
         </revealer>
     )
 }
@@ -435,23 +453,27 @@ function desktopEntryIcon(n: Notifd.Notification): string | null {
     return null
 }
 
+// A Gtk.Picture's natural size is the image's full size, which would blow up
+// the card for large images. An overlay only measures its main child, so a
+// fixed-size box dictates the size and the picture just fills it (cover-crop).
 function roundedImage(path: string, size: number): Gtk.Widget {
     return (
-        <box
+        <overlay
             class="notif-image"
             overflow={Gtk.Overflow.HIDDEN}
             halign={Gtk.Align.CENTER}
             valign={Gtk.Align.CENTER}
         >
+            <box widthRequest={size} heightRequest={size} />
             <Gtk.Picture
-                widthRequest={size}
-                heightRequest={size}
+                $type="overlay"
                 $={(self: Gtk.Picture) => {
                     self.set_filename(path)
                     self.set_content_fit(Gtk.ContentFit.COVER)
+                    self.set_can_shrink(true)
                 }}
             />
-        </box>
+        </overlay>
     ) as Gtk.Widget
 }
 
