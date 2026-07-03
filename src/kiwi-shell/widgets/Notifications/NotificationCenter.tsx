@@ -24,10 +24,37 @@ const EXIT_TOTAL_MS = EXIT_SLIDE_MS + EXIT_COLLAPSE_MS
 
 const notifd = Notifd.get_default()
 
+const NC_SLIDE_MS = 300
+
 export const [ncOpen, setNcOpen] = createState(false)
 
+// keeps the window alive (and fullscreen-anchored) until the close slide-out
+// animation has finished
+const [ncClosing, setNcClosing] = createState(false)
+let ncCloseTimer: ReturnType<typeof setTimeout> | null = null
+
+export function closeNc() {
+    if (!ncOpen()) return
+    setNcOpen(false)
+    setNcClosing(true)
+    if (ncCloseTimer) clearTimeout(ncCloseTimer)
+    ncCloseTimer = setTimeout(() => {
+        ncCloseTimer = null
+        setNcClosing(false)
+    }, NC_SLIDE_MS + 80)
+}
+
 export function toggleNc() {
-    setNcOpen(!ncOpen())
+    if (ncOpen()) {
+        closeNc()
+    } else {
+        if (ncCloseTimer) {
+            clearTimeout(ncCloseTimer)
+            ncCloseTimer = null
+        }
+        setNcClosing(false)
+        setNcOpen(true)
+    }
 }
 
 // active: banner on screen, closing: banner playing its exit animation,
@@ -165,13 +192,20 @@ function formatRelativeTime(time: number, now: number): string {
 }
 
 export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
-    const { TOP, RIGHT } = Astal.WindowAnchor
+    const { TOP, RIGHT, BOTTOM, LEFT } = Astal.WindowAnchor
 
     const dnd = createBinding(notifd, "dont-disturb")
 
     const showActive = createComputed(get =>
         get(activeNotifs).length > 0 && (get(ncOpen) || !get(dnd))
     )
+
+    // While the center is open (or sliding out) the window covers the whole
+    // usable screen: the transparent area acts as a backdrop so a click
+    // anywhere else closes it. With banners only, it hugs the top-right corner.
+    const ncShown = createComputed(get => get(ncOpen) || get(ncClosing))
+
+    let panelRef: Gtk.Widget | null = null
 
     // Scroll once the list would leave the viewport: cap the scrolled window at
     // monitor height minus the bar and, when it reserves space, the dock.
@@ -183,12 +217,13 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
     return (
         <window
             css={conf.as(conf => `--primary: ${conf.primary_color};`)}
-            visible={createComputed(get => get(showActive) || get(ncOpen))}
+            visible={createComputed(get => get(showActive) || get(ncOpen) || get(ncClosing))}
             name="ags-notification-center"
             class={conf.as(conf => `Notifications theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
-            exclusivity={Astal.Exclusivity.EXCLUSIVE}
-            anchor={TOP | RIGHT}
+            exclusivity={Astal.Exclusivity.NORMAL}
+            anchor={ncShown.as(shown => shown ? TOP | RIGHT | BOTTOM | LEFT : TOP | RIGHT)}
+            keymode={ncOpen.as(open => open ? Astal.Keymode.ON_DEMAND : Astal.Keymode.NONE)}
             application={app}
             layer={Astal.Layer.TOP}
             $={(self) => {
@@ -199,6 +234,31 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                         return GLib.SOURCE_REMOVE
                     })
                 })
+
+                // backdrop: any click outside the panel closes the center
+                const click = new Gtk.GestureClick()
+                click.set_button(0)
+                click.connect("released", (_gesture, _nPress, x, y) => {
+                    if (!ncOpen() || !panelRef) return
+                    const [ok, bounds] = panelRef.compute_bounds(self)
+                    if (!ok) return
+                    const inside =
+                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
+                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
+                    if (!inside) closeNc()
+                })
+                self.add_controller(click)
+
+                const key = new Gtk.EventControllerKey()
+                key.connect("key-pressed", (_controller, keyval) => {
+                    if (keyval === Gdk.KEY_Escape && ncOpen()) {
+                        closeNc()
+                        return true
+                    }
+                    return false
+                })
+                self.add_controller(key)
+
                 onCleanup(() => {
                     unsub()
                     self.destroy()
@@ -211,6 +271,9 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 propagateNaturalHeight
                 propagateNaturalWidth
                 maxContentHeight={maxListHeight}
+                halign={Gtk.Align.END}
+                valign={Gtk.Align.START}
+                $={(self) => { panelRef = self }}
             >
             <box class="notifications" orientation={Gtk.Orientation.VERTICAL} spacing={2}>
                 <box
@@ -223,11 +286,30 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                         {(n) => <Notification n={n} />}
                     </For>
                 </box>
+                <revealer
+                    transitionType={Gtk.RevealerTransitionType.SLIDE_LEFT}
+                    transitionDuration={NC_SLIDE_MS}
+                    halign={Gtk.Align.END}
+                    $={(self) => {
+                        // reveal one idle-tick after the window maps, otherwise the
+                        // transition is skipped and the panel just pops in
+                        const unsub = ncOpen.subscribe(() => {
+                            if (ncOpen()) {
+                                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                                    self.set_reveal_child(true)
+                                    return GLib.SOURCE_REMOVE
+                                })
+                            } else {
+                                self.set_reveal_child(false)
+                            }
+                        })
+                        onCleanup(unsub)
+                    }}
+                >
                 <box
                     class="expired-notifications"
                     orientation={Gtk.Orientation.VERTICAL}
                     spacing={2}
-                    visible={ncOpen}
                 >
                     <box
                         orientation={Gtk.Orientation.VERTICAL}
@@ -259,6 +341,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                         </For>
                     </box>
                 </box>
+                </revealer>
             </box>
             </scrolledwindow>
         </window>
