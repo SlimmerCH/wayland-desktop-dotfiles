@@ -3,13 +3,24 @@ import { Astal, Gtk, Gdk } from "ags/gtk4"
 import Notifd from "gi://AstalNotifd"
 import { For, createState, createBinding, createComputed, onCleanup } from "ags"
 import Gio from "gi://Gio"
+import GioUnix from "gi://GioUnix"
 import GLib from "gi://GLib"
+import Hyprland from "gi://AstalHyprland"
+import Pango from "gi://Pango"
 import { timeout } from "ags/time"
-import { AppIconImage } from "../appIcon";
 
-import { conf } from "../config";
+import { conf } from "../config"
 
-const DEFAULT_TIMEOUT = 4000
+const DEFAULT_TIMEOUT = 5000
+const NOTIF_WIDTH = 360
+const APP_ICON_SIZE = 38
+const IMAGE_SIZE = 42
+const MAX_HISTORY = 50
+
+const ENTER_MS = 400
+const EXIT_SLIDE_MS = 250
+const EXIT_COLLAPSE_MS = 200
+const EXIT_TOTAL_MS = EXIT_SLIDE_MS + EXIT_COLLAPSE_MS
 
 const notifd = Notifd.get_default()
 
@@ -19,22 +30,103 @@ export function toggleNc() {
     setNcOpen(!ncOpen())
 }
 
-const [notifState, setNotifState] = createState<Map<number, "active" | "expired">>(new Map())
+// active: banner on screen, closing: banner playing its exit animation,
+// expired: only listed in the notification center history
+type Phase = "active" | "closing" | "expired"
 
 const animatedIds = new Set<number>()
+const expiryTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+// Notifications the daemon kept from a previous shell instance go straight
+// to history, newest first.
+function seedExisting(): Map<number, Phase> {
+    try {
+        const existing = [...(notifd.get_notifications() ?? [])]
+        existing.sort((a, b) => b.time - a.time)
+        for (const n of existing) animatedIds.add(n.id)
+        return new Map(existing.map(n => [n.id, "expired" as const]))
+    } catch {
+        return new Map()
+    }
+}
+
+const [notifState, setNotifState] = createState<Map<number, Phase>>(seedExisting())
+
+function clearExpiryTimer(id: number) {
+    const timer = expiryTimers.get(id)
+    if (timer !== undefined) {
+        clearTimeout(timer)
+        expiryTimers.delete(id)
+    }
+}
+
+function scheduleExpiry(id: number) {
+    const n = notifd.get_notification(id)
+    if (!n) return
+    // Critical notifications stay until acted upon, like macOS alerts.
+    if (n.urgency === Notifd.Urgency.CRITICAL) return
+    const ms = n.expireTimeout > 0 ? n.expireTimeout : DEFAULT_TIMEOUT
+    expiryTimers.set(id, setTimeout(() => {
+        expiryTimers.delete(id)
+        beginClose(id)
+    }, ms))
+}
+
+function beginClose(id: number) {
+    setNotifState(m =>
+        m.get(id) === "active" ? new Map(m).set(id, "closing") : m
+    )
+    setTimeout(() => {
+        const n = notifd.get_notification(id)
+        if (n?.transient) {
+            // transient hint: excluded from persistence
+            n.dismiss()
+            return
+        }
+        setNotifState(m =>
+            m.get(id) === "closing" ? new Map(m).set(id, "expired") : m
+        )
+        trimHistory()
+    }, EXIT_TOTAL_MS)
+}
+
+function trimHistory() {
+    const expired = [...notifState()].filter(([, p]) => p === "expired")
+    for (const [id] of expired.slice(MAX_HISTORY)) {
+        const n = notifd.get_notification(id)
+        if (n) {
+            n.dismiss()
+        } else {
+            setNotifState(m => {
+                const next = new Map(m)
+                next.delete(id)
+                return next
+            })
+        }
+    }
+}
+
+function clearHistory() {
+    for (const [id, p] of notifState()) {
+        if (p !== "expired") continue
+        notifd.get_notification(id)?.dismiss()
+    }
+    setNotifState(m => new Map([...m].filter(([, p]) => p !== "expired")))
+}
 
 notifd.connect("notified", (_, id) => {
-    setNotifState(m => new Map([[id, "active" as const], ...m]))
-
-    const n = notifd.get_notification(id)
-    const n_timeout = n["expire-timeout"] > 0 ? n["expire-timeout"] : DEFAULT_TIMEOUT
-
-    timeout(n_timeout, () => {
-        setNotifState(m => new Map([...m, [id, "expired" as const]]))
+    // also fires for replacements: reset phase and expiry, move to the top
+    clearExpiryTimer(id)
+    setNotifState(m => {
+        const next = new Map(m)
+        next.delete(id)
+        return new Map([[id, "active" as const], ...next])
     })
+    scheduleExpiry(id)
 })
 
 notifd.connect("resolved", (_, id) => {
+    clearExpiryTimer(id)
     animatedIds.delete(id)
     setNotifState(m => {
         const next = new Map(m)
@@ -45,18 +137,32 @@ notifd.connect("resolved", (_, id) => {
 
 const activeNotifs = createComputed(get =>
     [...get(notifState).entries()]
-        .filter(([_, s]) => s === "active")
+        .filter(([, p]) => p === "active" || p === "closing")
         .map(([id]) => notifd.get_notification(id))
         .filter(Boolean) as Notifd.Notification[]
 )
 
 const expiredNotifs = createComputed(get =>
     [...get(notifState).entries()]
-        .filter(([_, s]) => s === "expired")
+        .filter(([, p]) => p === "expired")
         .map(([id]) => notifd.get_notification(id))
         .filter(Boolean) as Notifd.Notification[]
 )
 
+// clock for the relative timestamps
+const [nowSec, setNowSec] = createState(Math.floor(Date.now() / 1000))
+GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
+    setNowSec(Math.floor(Date.now() / 1000))
+    return GLib.SOURCE_CONTINUE
+})
+
+function formatRelativeTime(time: number, now: number): string {
+    const diff = Math.max(0, now - time)
+    if (diff < 60) return "now"
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+    return GLib.DateTime.new_from_unix_local(time)?.format("%b %e") ?? ""
+}
 
 export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const { TOP, RIGHT } = Astal.WindowAnchor
@@ -79,14 +185,17 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             application={app}
             layer={Astal.Layer.TOP}
             $={(self) => {
-                notifState.subscribe(() => {
+                const unsub = notifState.subscribe(() => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                         self.set_default_size(-1, -1)
                         self.queue_resize()
                         return GLib.SOURCE_REMOVE
                     })
                 })
-                onCleanup(() => self.destroy())
+                onCleanup(() => {
+                    unsub()
+                    self.destroy()
+                })
             }}
         >
             <box class="notifications" orientation={Gtk.Orientation.VERTICAL} spacing={2}>
@@ -121,6 +230,15 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                             No notifications
                         </box>
                     </box>
+                    <box class="nc-header" visible={expiredNotifs(l => l.length > 0)}>
+                        <label class="nc-title" label="Notifications" hexpand xalign={0} />
+                        <button class="clear-all-button" onClicked={clearHistory}>
+                            <box spacing={4}>
+                                <Gtk.Image iconName="edit-clear-all-symbolic" pixelSize={12} />
+                                <label label="Clear All" />
+                            </box>
+                        </button>
+                    </box>
                     <box orientation={Gtk.Orientation.VERTICAL} spacing={2}>
                         <For each={expiredNotifs}>
                             {(n) => <Notification n={n} />}
@@ -133,48 +251,301 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
 }
 
 function Notification({ n }: { n: Notifd.Notification }) {
+    const isNew = !animatedIds.has(n.id)
+    if (isNew) animatedIds.add(n.id)
+
+    const phase = createComputed(get => get(notifState).get(n.id))
+    const summary = createBinding(n, "summary")
+    const body = createBinding(n, "body")
+    const timeLabel = nowSec(now => formatRelativeTime(n.time, now))
+
+    const { icon, image } = notifVisuals(n)
+    const actionButtons = (n.actions ?? []).filter(a => a.id !== "default")
+
+    let card: Gtk.Widget | null = null
+
     return (
-        <button
-            class="notification"
+        <revealer
+            transitionType={Gtk.RevealerTransitionType.SLIDE_DOWN}
+            transitionDuration={EXIT_COLLAPSE_MS}
+            revealChild={!isNew}
             $={(self) => {
-                if (!animatedIds.has(n.id)) {
-                    animatedIds.add(n.id)
-                    self.add_css_class("slide-in")
-                    timeout(400, () => self.remove_css_class("slide-in"))
+                if (isNew) {
+                    // start collapsed so neighbors get pushed smoothly, then reveal
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        self.set_reveal_child(true)
+                        return GLib.SOURCE_REMOVE
+                    })
                 }
-            }}
-            onclicked={() => {
-                print("Notification clicked:", n.summary)
-                n.dismiss()
+                const unsub = phase.subscribe(() => {
+                    if (phase() === "closing") {
+                        card?.add_css_class("slide-out")
+                        setTimeout(() => {
+                            if (notifState().get(n.id) === "closing")
+                                self.set_reveal_child(false)
+                        }, EXIT_SLIDE_MS)
+                    } else if (phase() === "active") {
+                        // replaced while closing: bring it back
+                        card?.remove_css_class("slide-out")
+                        self.set_reveal_child(true)
+                    }
+                })
+                onCleanup(unsub)
             }}
         >
-            <box
-                orientation={Gtk.Orientation.VERTICAL}
-                halign={Gtk.Align.START}
-                spacing={0}
+            <button
+                class="notification"
+                widthRequest={NOTIF_WIDTH}
+                $={(self) => {
+                    card = self
+                    if (isNew) {
+                        self.add_css_class("slide-in")
+                        timeout(ENTER_MS, () => self.remove_css_class("slide-in"))
+                    }
+                    if (n.urgency === Notifd.Urgency.CRITICAL) {
+                        self.add_css_class("critical")
+                    }
+                }}
+                onClicked={() => {
+                    // macOS behavior: clicking opens the source (default action if
+                    // the app provides one, otherwise focus its window) and the
+                    // notification is gone for good, including from the center.
+                    if ((n.actions ?? []).some(a => a.id === "default")) {
+                        n.invoke("default")
+                    } else {
+                        focusApp(n)
+                    }
+                    n.dismiss()
+                }}
             >
-                <box class="header">
-                    {n["desktop-entry"] && (
-                        <AppIconImage entry={n["desktop-entry"].toLowerCase()+".desktop"} pixelSize={16} cssClass="notification-icon" />
-                    )}
-                    <label class="app-name" label={n["app-name"].toUpperCase()} halign={Gtk.Align.START} />
-                </box>
-                <label class="summary" label={String(n.summary)} halign={Gtk.Align.START} />
-                <label class="body" label={String(n.body).trim()} halign={Gtk.Align.START} />
-            </box>
-        </button>
+                <overlay>
+                    <box class="notification-content" spacing={10}>
+                        {icon}
+                        <box orientation={Gtk.Orientation.VERTICAL} hexpand valign={Gtk.Align.CENTER}>
+                            <box class="header" spacing={6}>
+                                <label
+                                    class="app-name"
+                                    label={n.appName.toUpperCase()}
+                                    ellipsize={Pango.EllipsizeMode.END}
+                                    maxWidthChars={1}
+                                    hexpand
+                                    xalign={0}
+                                />
+                                <label class="notif-time" label={timeLabel} halign={Gtk.Align.END} />
+                            </box>
+                            <label
+                                class="summary"
+                                label={summary.as(s => String(s ?? ""))}
+                                ellipsize={Pango.EllipsizeMode.END}
+                                maxWidthChars={1}
+                                hexpand
+                                xalign={0}
+                            />
+                            <label
+                                class="body"
+                                useMarkup
+                                label={body.as(b => sanitizeBody(String(b ?? "")))}
+                                visible={body.as(b => String(b ?? "").trim() !== "")}
+                                wrap
+                                wrapMode={Pango.WrapMode.WORD_CHAR}
+                                ellipsize={Pango.EllipsizeMode.END}
+                                lines={4}
+                                maxWidthChars={1}
+                                hexpand
+                                xalign={0}
+                                $={(self) => {
+                                    self.connect("activate-link", (_label, uri: string) => {
+                                        openUri(uri)
+                                        return true
+                                    })
+                                }}
+                            />
+                            {actionButtons.length > 0 && (
+                                <box class="actions" spacing={6} halign={Gtk.Align.END}>
+                                    {actionButtons.map(action => (
+                                        <button
+                                            class="action-button"
+                                            onClicked={() => {
+                                                n.invoke(action.id)
+                                                if (!n.resident) n.dismiss()
+                                            }}
+                                        >
+                                            {n.actionIcons
+                                                ? <Gtk.Image iconName={action.id} pixelSize={14} />
+                                                : <label
+                                                    label={action.label}
+                                                    ellipsize={Pango.EllipsizeMode.END}
+                                                    maxWidthChars={16}
+                                                />}
+                                        </button>
+                                    ))}
+                                </box>
+                            )}
+                        </box>
+                        {image}
+                    </box>
+                    <button
+                        $type="overlay"
+                        class="close-button"
+                        halign={Gtk.Align.START}
+                        valign={Gtk.Align.START}
+                        onClicked={() => n.dismiss()}
+                    >
+                        <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
+                    </button>
+                </overlay>
+            </button>
+        </revealer>
     )
 }
 
-function getAppIcon(n: Notifd.Notification): string | null {
-    const desktopEntry = n.desktop_entry
-    if (!desktopEntry) return null
+// ─── Icons / images ───────────────────────────────────────────────────────────
 
-    const appInfo = Gio.DesktopAppInfo.new(`${desktopEntry}.desktop`)
-    if (!appInfo) return null
+function filePathOf(str: string | null | undefined): string | null {
+    if (!str) return null
+    const path = str.startsWith("file://") ? str.slice("file://".length) : str
+    if (!path.startsWith("/")) return null
+    return GLib.file_test(path, GLib.FileTest.EXISTS) ? path : null
+}
 
-    const icon = appInfo.get_icon()
-    if (!icon) return null
+function desktopEntryIcon(n: Notifd.Notification): string | null {
+    const de = n.desktopEntry
+    if (!de) return null
+    const base = de.endsWith(".desktop") ? de.slice(0, -".desktop".length) : de
+    for (const candidate of [base, base.toLowerCase()]) {
+        const info = GioUnix.DesktopAppInfo.new(candidate + ".desktop")
+        const iconName = info?.get_string("Icon")
+        if (iconName) return iconName
+    }
+    return null
+}
 
-    return (icon as Gio.ThemedIcon).get_names?.()?.[0] ?? null
+function roundedImage(path: string, size: number): Gtk.Widget {
+    return (
+        <box
+            class="notif-image"
+            overflow={Gtk.Overflow.HIDDEN}
+            halign={Gtk.Align.CENTER}
+            valign={Gtk.Align.CENTER}
+        >
+            <Gtk.Picture
+                widthRequest={size}
+                heightRequest={size}
+                $={(self: Gtk.Picture) => {
+                    self.set_filename(path)
+                    self.set_content_fit(Gtk.ContentFit.COVER)
+                }}
+            />
+        </box>
+    ) as Gtk.Widget
+}
+
+// App icon on the left, content image (image-path / image-data hint) on the
+// right — like macOS. If there is no app icon, the content image is promoted
+// to the app-icon slot instead of showing a generic fallback.
+function notifVisuals(n: Notifd.Notification): { icon: Gtk.Widget, image: Gtk.Widget | null } {
+    const themedIcon = desktopEntryIcon(n)
+        ?? (n.appIcon && !filePathOf(n.appIcon) ? n.appIcon : null)
+    const appIconPath = filePathOf(n.appIcon)
+    const imagePath = filePathOf(n.image)
+    const imageIconName = !imagePath && n.image ? n.image : null
+
+    const iconImage = (iconName: string) => (
+        <Gtk.Image
+            iconName={iconName}
+            pixelSize={APP_ICON_SIZE}
+            class="notif-app-icon"
+            valign={Gtk.Align.CENTER}
+        />
+    ) as Gtk.Widget
+
+    const icon =
+        themedIcon ? iconImage(themedIcon)
+        : appIconPath ? roundedImage(appIconPath, APP_ICON_SIZE)
+        : imagePath ? roundedImage(imagePath, APP_ICON_SIZE)
+        : imageIconName ? iconImage(imageIconName)
+        : iconImage("dialog-information-symbolic")
+
+    const imageUsedAsIcon = !themedIcon && !appIconPath
+    const image = imageUsedAsIcon ? null
+        : imagePath ? roundedImage(imagePath, IMAGE_SIZE)
+        : imageIconName ? (
+            <Gtk.Image
+                iconName={imageIconName}
+                pixelSize={IMAGE_SIZE}
+                class="notif-image-icon"
+                valign={Gtk.Align.CENTER}
+            />
+        ) as Gtk.Widget
+        : null
+
+    return { icon, image }
+}
+
+// ─── Body markup ──────────────────────────────────────────────────────────────
+
+// The spec allows a small HTML subset in the body (<b>, <i>, <u>, <a>, <img>),
+// but arbitrary text is common too. Escape everything, then re-allow tags that
+// GtkLabel's Pango markup understands, so stray '<', '>' and '&' can't break
+// rendering. Falls back to plain text when tags don't balance.
+function sanitizeBody(rawBody: string): string {
+    const stripped = rawBody
+        .replace(/<img[^>]*>/gi, "")
+        .replace(/<br\s*\/?>/gi, "\n")
+
+    let s = GLib.markup_escape_text(stripped, -1)
+    s = s.replace(/&lt;(\/?)(b|i|u|s|tt|big|small|sub|sup)&gt;/gi, "<$1$2>")
+    s = s.replace(
+        /&lt;a\s+href=(&quot;|&apos;)([\s\S]*?)\1&gt;/gi,
+        (_match, _quote, href) => `<a href="${href.replace(/&apos;/g, "&#39;")}">`,
+    )
+    s = s.replace(/&lt;\/a&gt;/gi, "</a>")
+
+    if (!tagsBalanced(s)) {
+        return GLib.markup_escape_text(stripped.replace(/<[^>]*>/g, ""), -1)
+    }
+    return s
+}
+
+function tagsBalanced(markup: string): boolean {
+    const stack: string[] = []
+    const tagRe = /<(\/?)([a-z]+)(?:\s[^>]*)?>/gi
+    let match: RegExpExecArray | null
+    while ((match = tagRe.exec(markup)) !== null) {
+        if (match[1]) {
+            if (stack.pop() !== match[2].toLowerCase()) return false
+        } else {
+            stack.push(match[2].toLowerCase())
+        }
+    }
+    return stack.length === 0
+}
+
+// Focus an existing window of the sending app, if there is one. Deliberately
+// conservative (exact class match only) — never launches anything.
+function focusApp(n: Notifd.Notification) {
+    const targets = [
+        n.desktopEntry?.replace(/\.desktop$/i, ""),
+        n.appName,
+    ].filter(Boolean).map(s => String(s).toLowerCase())
+    if (targets.length === 0) return
+
+    try {
+        const client = Hyprland.get_default().get_clients().find((c: any) => {
+            const initialClass = (c["initial-class"] ?? "").toLowerCase()
+            const cls = (c["class"] ?? "").toLowerCase()
+            return targets.some(t => t === initialClass || t === cls)
+        })
+        client?.focus()
+    } catch (error) {
+        console.error("Failed to focus app for notification:", error)
+    }
+}
+
+function openUri(uri: string) {
+    try {
+        Gio.AppInfo.launch_default_for_uri(uri, null)
+    } catch (error) {
+        console.error("Failed to open link:", error)
+    }
 }

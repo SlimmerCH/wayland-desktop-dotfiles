@@ -63,6 +63,7 @@ function playArpeggio(index: number) {
 
 const STAGGER_MS = 40
 const CASCADE_DELAY_MS = 100
+export const ICON_ANIM_MS = 700
 
 const dockBarRoots = new Set<Gtk.Widget>()
 
@@ -91,7 +92,16 @@ export function cascadeDockIcons(scope?: Gtk.Widget) {
             w.remove_css_class("fade-in")
         })
         icons.forEach((w, i) => {
-            setTimeout(() => {w.add_css_class("fade-in"); w.add_css_class("reserved")}, i * STAGGER_MS + CASCADE_DELAY_MS)
+            const delay = i * STAGGER_MS + CASCADE_DELAY_MS
+            setTimeout(() => {w.add_css_class("fade-in"); w.add_css_class("reserved")}, delay)
+            // drop the one-shot animation classes once done, so later style
+            // recomputations can't replay the animation on settled icons
+            setTimeout(() => {
+                if (!w.get_parent()) return
+                w.remove_css_class("fade-in")
+                w.remove_css_class("reserved")
+                w.add_css_class("shown")
+            }, delay + ICON_ANIM_MS)
         })
     }
 }
@@ -105,7 +115,8 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     let leaveTimeout: number | null = null
     let selfRef: Astal.Window | null = null
     let dockBoxRef: Gtk.Widget | null = null
-    let wasShowing = false
+    let regionGen = 0
+    let modeTransitioning = false
 
     const showDock = createComputed(get => {
         const config = get(conf)
@@ -140,7 +151,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         const surface = selfRef.get_surface()
         if (!surface) return
         const [ok, bounds] = dockBoxRef.compute_bounds(selfRef)
-        if (!ok) return
+        if (!ok || bounds.get_width() <= 0) return
         const rect = new Cairo.RectangleInt()
         rect.x = Math.floor(bounds.get_x())
         rect.y = Math.floor(bounds.get_y())
@@ -151,25 +162,32 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         surface.set_input_region(region)
     }
 
-    // Called on showDock change or init:
+    // Applies the region for the *current* state:
     // - hidden → empty region (full click-through)
-    // - showing in auto-hide → full window so cursor can travel up to dock
-    // - showing in default mode → narrow region (dock box only)
-    const updateRegion = () => {
+    // - showing in auto-hide with travel → full window so cursor can travel up to dock
+    // - otherwise showing → narrow region (dock box only)
+    const applyRegion = (travel = false) => {
         if (!selfRef) return
         const surface = selfRef.get_surface()
         if (!surface) return
-        const isShowing = showDock()
-        if (!isShowing) {
+        if (!showDock()) {
             surface.set_input_region(new Cairo.Region())
-            setTimeout(() => { wasShowing = false }, DOCK_SLIDE_DURATION)
-        } else if (conf().dock === "auto-hide") {
+        } else if (travel && conf().dock === "auto-hide") {
             surface.set_input_region(null)
-            wasShowing = true
         } else {
             setNarrowRegion()
-            wasShowing = true
         }
+    }
+
+    // Re-applies the region once the slide/reflow animation has settled. The
+    // generation counter voids the pending callback whenever a newer region
+    // change happens, so a stale timeout can never stamp a ghost region onto a
+    // hidden dock (which used to freeze it).
+    const applyRegionSettled = (delay = DOCK_SLIDE_DURATION + 50) => {
+        const gen = ++regionGen
+        setTimeout(() => {
+            if (gen === regionGen && !modeTransitioning) applyRegion()
+        }, delay)
     }
 
     return [(
@@ -213,7 +231,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     }
                 })
                 motionController.connect("leave", () => {
-                    setNarrowRegion()
+                    applyRegion()
                     leaveTimeout = setTimeout(() => {
                         setDockHovered(false)
                         leaveTimeout = null
@@ -235,7 +253,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     }
                 })
                 dragMotion.connect("leave", () => {
-                    setNarrowRegion()
+                    applyRegion()
                     leaveTimeout = setTimeout(() => {
                         setDockHovered(false)
                         leaveTimeout = null
@@ -243,15 +261,11 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 })
                 self.add_controller(dragMotion)
 
-                let modeTransitioning = false
-
                 showDock.subscribe(() => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                         if (!modeTransitioning) {
-                            updateRegion()
-                            if (showDock() && conf().dock === "auto-hide") {
-                                setTimeout(() => setNarrowRegion(), DOCK_SLIDE_DURATION)
-                            }
+                            applyRegion(true)
+                            applyRegionSettled()
                         }
                         return GLib.SOURCE_REMOVE
                     })
@@ -264,12 +278,13 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     prevMode = mode
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                         modeTransitioning = true
+                        regionGen++
                         const surface = selfRef?.get_surface()
                         if (surface) surface.set_input_region(null)
                         setTimeout(() => {
                             modeTransitioning = false
-                            wasShowing = false
-                            updateRegion()
+                            regionGen++
+                            applyRegion()
                         }, DOCK_SLIDE_DURATION)
                         return GLib.SOURCE_REMOVE
                     })
@@ -277,7 +292,11 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
 
                 lengths.subscribe(() => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        setNarrowRegion()
+                        if (!modeTransitioning) {
+                            applyRegion()
+                            // icon add/remove reflow animations run for ~650ms
+                            applyRegionSettled(700)
+                        }
                         return GLib.SOURCE_REMOVE
                     })
                 })
@@ -294,7 +313,8 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                                 widget.disconnect(signalId)
                                 signalId = null
                             }
-                            updateRegion()
+                            applyRegion()
+                            applyRegionSettled()
                         }
                     })
                 }}

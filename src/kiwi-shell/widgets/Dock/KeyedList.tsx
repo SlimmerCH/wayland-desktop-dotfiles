@@ -6,6 +6,7 @@ export function KeyedList<T>({
     keyFn,
     children,
     enterClass,
+    enterDuration = 700,
     shouldEnter,
     appendOnly,
 }: {
@@ -13,6 +14,7 @@ export function KeyedList<T>({
     keyFn: (item: T) => string
     children: (item: T) => Gtk.Widget
     enterClass?: string
+    enterDuration?: number
     shouldEnter?: (item: T) => boolean
     appendOnly?: boolean
 }) {
@@ -56,6 +58,13 @@ export function KeyedList<T>({
                                         const animate = shouldEnter ? shouldEnter(item) : true
                                         if (animate) {
                                             w.add_css_class(enterClass)
+                                            // settle to .shown once the enter animation is
+                                            // done, so it can never replay on this widget
+                                            setTimeout(() => {
+                                                if (!w.get_parent()) return
+                                                w.remove_css_class(enterClass)
+                                                w.add_css_class("shown")
+                                            }, enterDuration)
                                         } else {
                                             w.add_css_class("shown")
                                         }
