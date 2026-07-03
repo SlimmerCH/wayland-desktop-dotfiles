@@ -173,6 +173,13 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
         get(activeNotifs).length > 0 && (get(ncOpen) || !get(dnd))
     )
 
+    // Scroll once the list would leave the viewport: cap the scrolled window at
+    // monitor height minus the bar and, when it reserves space, the dock.
+    const maxListHeight = conf.as(c => {
+        const dockAllowance = c.dock === "default" ? (c.dock_icon_size ?? 56) + 46 : 0
+        return Math.max(200, gdkmonitor.get_geometry().height - 48 - dockAllowance)
+    })
+
     return (
         <window
             css={conf.as(conf => `--primary: ${conf.primary_color};`)}
@@ -198,6 +205,13 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 })
             }}
         >
+            <scrolledwindow
+                hscrollbarPolicy={Gtk.PolicyType.NEVER}
+                vscrollbarPolicy={Gtk.PolicyType.AUTOMATIC}
+                propagateNaturalHeight
+                propagateNaturalWidth
+                maxContentHeight={maxListHeight}
+            >
             <box class="notifications" orientation={Gtk.Orientation.VERTICAL} spacing={2}>
                 <box
                     class="active-notifications"
@@ -246,6 +260,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                     </box>
                 </box>
             </box>
+            </scrolledwindow>
         </window>
     )
 }
