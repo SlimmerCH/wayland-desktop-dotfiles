@@ -7,6 +7,7 @@ import GioUnix from "gi://GioUnix"
 import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
 import Pango from "gi://Pango"
+import Cairo from "gi://cairo"
 import { timeout } from "ags/time"
 
 import { conf } from "../config"
@@ -33,10 +34,14 @@ export const [ncOpen, setNcOpen] = createState(false)
 const [ncClosing, setNcClosing] = createState(false)
 let ncCloseTimer: ReturnType<typeof setTimeout> | null = null
 
+// State update order matters in here: window visibility is computed from
+// (ncOpen || ncClosing) and each set() re-evaluates it synchronously. The
+// window must never see both false mid-transition, or it unmaps for a tick
+// and GTK skips the slide animation.
 export function closeNc() {
     if (!ncOpen()) return
-    setNcOpen(false)
     setNcClosing(true)
+    setNcOpen(false)
     if (ncCloseTimer) clearTimeout(ncCloseTimer)
     ncCloseTimer = setTimeout(() => {
         ncCloseTimer = null
@@ -48,12 +53,13 @@ export function toggleNc() {
     if (ncOpen()) {
         closeNc()
     } else {
+        // reopening mid slide-out just reverses the animation
         if (ncCloseTimer) {
             clearTimeout(ncCloseTimer)
             ncCloseTimer = null
         }
-        setNcClosing(false)
         setNcOpen(true)
+        setNcClosing(false)
     }
 }
 
@@ -259,8 +265,24 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 })
                 self.add_controller(key)
 
+                // while sliding out, the still-fullscreen backdrop should not
+                // eat clicks anymore — make it click-through
+                const updateInputRegion = () => {
+                    const surface = self.get_surface()
+                    if (!surface) return
+                    if (ncClosing() && !ncOpen()) {
+                        surface.set_input_region(new Cairo.Region())
+                    } else {
+                        surface.set_input_region(null)
+                    }
+                }
+                const unsubOpen = ncOpen.subscribe(updateInputRegion)
+                const unsubClosing = ncClosing.subscribe(updateInputRegion)
+
                 onCleanup(() => {
                     unsub()
+                    unsubOpen()
+                    unsubClosing()
                     self.destroy()
                 })
             }}
@@ -296,7 +318,9 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                         const unsub = ncOpen.subscribe(() => {
                             if (ncOpen()) {
                                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                                    self.set_reveal_child(true)
+                                    // re-check: the toggle may have been spammed
+                                    // before this idle ran
+                                    if (ncOpen()) self.set_reveal_child(true)
                                     return GLib.SOURCE_REMOVE
                                 })
                             } else {
