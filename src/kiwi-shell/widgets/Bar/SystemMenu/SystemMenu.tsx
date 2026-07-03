@@ -14,6 +14,7 @@ import PerformanceTab from "./tabs/PerformanceTab"
 import { conf } from "../../config"
 import { Icon } from "../../iconNames"
 import { playSound } from "../../sound"
+import { closeNc } from "../../Notifications/NotificationCenter"
 import { debug } from "../../../app"
 
 import AstalBluetooth from "gi://AstalBluetooth?version=0.1"
@@ -95,6 +96,7 @@ export default function SystemMenu() {
       $={(self) => (systemMenuPopover = self)}
       onShow={() => {
         setSystemMenuOpen(true)
+        closeNc()
         if (activeTab.get() === 1) {
           rescanWifi()
         }

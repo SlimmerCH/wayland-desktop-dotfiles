@@ -7,6 +7,7 @@ import Battery from "gi://AstalBattery"
 import Network from "gi://AstalNetwork"
 
 import SystemMenu, { systemMenuOpen, closeSystemMenu } from "./SystemMenu/SystemMenu"
+import { closeNc } from "../Notifications/NotificationCenter"
 import Workspaces from "./Workspaces"
 import PowerMenu from "./PowerMenu"
 import Tray from "./Tray"
@@ -142,7 +143,12 @@ function MenuButtons({ toggleNc, onToggleNcReady }: {
                     iconName={"system-shutdown-symbolic"}
                     pixelSize={14}
                 />
-                <popover class="power-popover" hasArrow={false} autohide={true}>
+                <popover
+                    class="power-popover"
+                    hasArrow={false}
+                    autohide={true}
+                    onShow={() => closeNc()}
+                >
                     <PowerMenu />
                 </popover>
             </menubutton>

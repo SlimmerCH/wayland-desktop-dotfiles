@@ -179,12 +179,14 @@
 }
 
 // the history panel slides in/out from the right screen edge; the scrolled
-// window's viewport clips it, so the transform moves it fully out of view
+// window's viewport clips it, so the transform moves it fully out of view.
+// The distance must exceed any possible panel width — if it's shorter, the
+// transition finishes with a sliver of the panel still visible ("stuck").
 .nc-panel {
     transition: transform 300ms cubic-bezier(0.2, 0.9, 0.3, 1);
 
     &.slide-out {
-        transform: translateX(420px);
+        transform: translateX(800px);
     }
 }
 
@@ -194,7 +196,7 @@
     transition: transform 300ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 300ms ease;
 
     &.offscreen {
-        transform: translateX(400px);
+        transform: translateX(600px);
         opacity: 0.4;
     }
 }

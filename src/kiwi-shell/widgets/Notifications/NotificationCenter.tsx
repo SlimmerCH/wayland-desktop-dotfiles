@@ -44,7 +44,7 @@ export function closeNc() {
     ncCloseTimer = setTimeout(() => {
         ncCloseTimer = null
         setNcClosing(false)
-    }, NC_SLIDE_MS + 150)
+    }, NC_SLIDE_MS + 300)
 }
 
 export function toggleNc() {
@@ -240,12 +240,10 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
         get(activeNotifs).length > 0 && (get(ncOpen) || !get(dnd))
     )
 
-    // While the center is open the window covers the whole usable screen: the
-    // transparent area acts as a backdrop so a click anywhere else closes it.
-    // The moment closing starts it snaps back to the corner-anchored mode the
-    // banners use — the backdrop stops eating input right away, and the
-    // slide-out plays in a small surface (the fullscreen one tended to stop
-    // getting frames mid-animation, freezing the panel half-out).
+    // While the center is open (or flying out) the window covers the whole
+    // usable screen: the transparent area acts as a backdrop so a click
+    // anywhere else closes it (input is released the moment closing starts via
+    // the input region below). With banners only, it hugs the top-right corner.
     const ncShown = createComputed(get => get(ncOpen) || get(ncClosing))
 
     let panelRef: Gtk.Widget | null = null
@@ -265,7 +263,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             class={conf.as(conf => `Notifications theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
             exclusivity={Astal.Exclusivity.NORMAL}
-            anchor={ncOpen.as(open => open ? TOP | RIGHT | BOTTOM | LEFT : TOP | RIGHT)}
+            anchor={ncShown.as(shown => shown ? TOP | RIGHT | BOTTOM | LEFT : TOP | RIGHT)}
             keymode={ncOpen.as(open => open ? Astal.Keymode.ON_DEMAND : Astal.Keymode.NONE)}
             application={app}
             layer={Astal.Layer.TOP}
