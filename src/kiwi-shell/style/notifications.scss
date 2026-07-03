@@ -27,6 +27,14 @@
     font-size: 10.5px;
 }
 
+// top/left inset inside the overlay wrapper gives the close button room to
+// stick out past the card corner without being clipped by the window edge;
+// tuned so the button sits centered on the corner arc — half over the card
+.notification {
+    margin-left: 4px;
+    margin-top: 4px;
+}
+
 .no-notifications {
     min-width: 250px;
     padding: 10px;
@@ -80,6 +88,23 @@
     }
 }
 
+.expand-button {
+    background: none;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    border-radius: 6px;
+    padding: 0 5px;
+    margin-top: 2px;
+    font-size: 9px;
+    color: #9a9a9a;
+
+    &:hover {
+        color: #fff;
+        background-color: rgba(255, 255, 255, 0.08);
+    }
+}
+
 .actions {
     margin-top: 8px;
 }
@@ -99,15 +124,15 @@
     }
 }
 
-// sits on the card's top-left corner (sibling of the card, macOS style)
+// straddles the card's top-left corner (sibling of the card, macOS style)
 .close-button {
     background-color: rgba(55, 55, 55, 0.95);
     background-image: none;
     border: 1px solid rgba(120, 120, 120, 0.5);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     border-radius: 100%;
-    min-width: 20px;
-    min-height: 20px;
+    min-width: 16px;
+    min-height: 16px;
     padding: 0;
     opacity: 0;
     transition: opacity 150ms ease;
@@ -150,6 +175,16 @@
     &:hover {
         background-color: rgba(255, 255, 255, 0.2);
         color: #fff;
+    }
+}
+
+// the history panel slides in/out from the right screen edge; the scrolled
+// window's viewport clips it, so the transform moves it fully out of view
+.nc-panel {
+    transition: transform 300ms cubic-bezier(0.2, 0.9, 0.3, 1);
+
+    &.slide-out {
+        transform: translateX(420px);
     }
 }
 

@@ -182,6 +182,13 @@ const expiredNotifs = createComputed(get =>
         .filter(Boolean) as Notifd.Notification[]
 )
 
+// bumped whenever a card changes size on its own (e.g. body expand/collapse)
+// so the window can shrink back to its natural size
+const [resizeTick, setResizeTick] = createState(0)
+function requestNcResize() {
+    setResizeTick(resizeTick() + 1)
+}
+
 // clock for the relative timestamps
 const [nowSec, setNowSec] = createState(Math.floor(Date.now() / 1000))
 GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
@@ -233,13 +240,15 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             application={app}
             layer={Astal.Layer.TOP}
             $={(self) => {
-                const unsub = notifState.subscribe(() => {
+                const shrinkToFit = () => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                         self.set_default_size(-1, -1)
                         self.queue_resize()
                         return GLib.SOURCE_REMOVE
                     })
-                })
+                }
+                const unsub = notifState.subscribe(shrinkToFit)
+                const unsubResize = resizeTick.subscribe(shrinkToFit)
 
                 // backdrop: any click outside the panel closes the center
                 const click = new Gtk.GestureClick()
@@ -281,6 +290,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
 
                 onCleanup(() => {
                     unsub()
+                    unsubResize()
                     unsubOpen()
                     unsubClosing()
                     self.destroy()
@@ -308,32 +318,30 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                         {(n) => <Notification n={n} />}
                     </For>
                 </box>
-                <revealer
-                    transitionType={Gtk.RevealerTransitionType.SLIDE_LEFT}
-                    transitionDuration={NC_SLIDE_MS}
-                    halign={Gtk.Align.END}
+                <box
+                    class="expired-notifications nc-panel slide-out"
+                    orientation={Gtk.Orientation.VERTICAL}
+                    spacing={2}
+                    visible={ncShown}
                     $={(self) => {
-                        // reveal one idle-tick after the window maps, otherwise the
-                        // transition is skipped and the panel just pops in
+                        // plain CSS transform slide (like the dock): the viewport
+                        // clips the panel, so translating it moves it out of view.
+                        // Slide in one idle-tick after mapping, otherwise the
+                        // transition is skipped and the panel just pops in.
                         const unsub = ncOpen.subscribe(() => {
                             if (ncOpen()) {
                                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                                     // re-check: the toggle may have been spammed
                                     // before this idle ran
-                                    if (ncOpen()) self.set_reveal_child(true)
+                                    if (ncOpen()) self.remove_css_class("slide-out")
                                     return GLib.SOURCE_REMOVE
                                 })
                             } else {
-                                self.set_reveal_child(false)
+                                self.add_css_class("slide-out")
                             }
                         })
                         onCleanup(unsub)
                     }}
-                >
-                <box
-                    class="expired-notifications"
-                    orientation={Gtk.Orientation.VERTICAL}
-                    spacing={2}
                 >
                     <box
                         orientation={Gtk.Orientation.VERTICAL}
@@ -365,7 +373,6 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                         </For>
                     </box>
                 </box>
-                </revealer>
             </box>
             </scrolledwindow>
         </window>
@@ -380,6 +387,12 @@ function Notification({ n }: { n: Notifd.Notification }) {
     const summary = createBinding(n, "summary")
     const body = createBinding(n, "body")
     const timeLabel = nowSec(now => formatRelativeTime(n.time, now))
+
+    // long bodies are clamped to 4 lines; when the text actually gets
+    // ellipsized a more/less control expands the card downwards
+    const [expanded, setExpanded] = createState(false)
+    const [clipped, setClipped] = createState(false)
+    const expandable = createComputed(get => get(clipped) || get(expanded))
 
     const { icon, image } = notifVisuals(n)
     const actionButtons = (n.actions ?? []).filter(a => a.id !== "default")
@@ -488,8 +501,10 @@ function Notification({ n }: { n: Notifd.Notification }) {
                                 visible={body.as(b => String(b ?? "").trim() !== "")}
                                 wrap
                                 wrapMode={Pango.WrapMode.WORD_CHAR}
-                                ellipsize={Pango.EllipsizeMode.END}
-                                lines={4}
+                                ellipsize={expanded.as(e =>
+                                    e ? Pango.EllipsizeMode.NONE : Pango.EllipsizeMode.END
+                                )}
+                                lines={expanded.as(e => (e ? -1 : 4))}
                                 maxWidthChars={1}
                                 hexpand
                                 xalign={0}
@@ -498,8 +513,46 @@ function Notification({ n }: { n: Notifd.Notification }) {
                                         openUri(uri)
                                         return true
                                     })
+                                    // the layout only knows whether it ellipsized
+                                    // after it has been laid out once
+                                    const checkClipped = () => {
+                                        if (!self.get_mapped() || expanded()) return
+                                        setClipped(self.get_layout()?.is_ellipsized() ?? false)
+                                    }
+                                    self.connect("map", () => {
+                                        self.add_tick_callback(() => {
+                                            checkClipped()
+                                            return GLib.SOURCE_REMOVE
+                                        })
+                                    })
+                                    const unsubBody = body.subscribe(() => {
+                                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                                            checkClipped()
+                                            return GLib.SOURCE_REMOVE
+                                        })
+                                    })
+                                    onCleanup(unsubBody)
                                 }}
                             />
+                            <button
+                                class="expand-button"
+                                visible={expandable}
+                                halign={Gtk.Align.START}
+                                onClicked={() => {
+                                    setExpanded(!expanded())
+                                    requestNcResize()
+                                }}
+                            >
+                                <box spacing={2}>
+                                    <label label={expanded.as(e => (e ? "less" : "more"))} />
+                                    <Gtk.Image
+                                        iconName={expanded.as(e =>
+                                            e ? "pan-up-symbolic" : "pan-down-symbolic"
+                                        )}
+                                        pixelSize={10}
+                                    />
+                                </box>
+                            </button>
                             {actionButtons.length > 0 && (
                                 <box class="actions" spacing={6} halign={Gtk.Align.END}>
                                     {actionButtons.map(action => (
@@ -532,7 +585,7 @@ function Notification({ n }: { n: Notifd.Notification }) {
                     valign={Gtk.Align.START}
                     onClicked={() => n.dismiss()}
                 >
-                    <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
+                    <Gtk.Image iconName="window-close-symbolic" pixelSize={9} />
                 </button>
             </overlay>
         </revealer>
