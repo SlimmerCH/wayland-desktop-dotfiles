@@ -6,7 +6,7 @@ import { createBinding, createComputed, onCleanup } from "ags"
 import Battery from "gi://AstalBattery"
 import Network from "gi://AstalNetwork"
 
-import SystemMenu, { systemMenuTabState } from "./SystemMenu/SystemMenu"
+import SystemMenu, { systemMenuOpen, closeSystemMenu } from "./SystemMenu/SystemMenu"
 import Workspaces from "./Workspaces"
 import PowerMenu from "./PowerMenu"
 import Tray from "./Tray"
@@ -36,6 +36,18 @@ export default function Bar({
     gdkmonitor: Gdk.Monitor
     toggleNc: () => void
 }) {
+    let toggleNcButton: Gtk.Widget | null = null
+    let forcedToggleAt = 0
+
+    // While the system menu popover is open, GTK retargets every click in the
+    // bar window to the popover (dismiss + consume), so the clock button never
+    // sees it. This capture-phase gesture runs before that retargeting and
+    // turns a click on the clock into "close menu, open notification center".
+    const guardedToggleNc = () => {
+        if (Date.now() - forcedToggleAt < 300) return
+        toggleNc()
+    }
+
     return [
         <window
             css={windowCss}
@@ -77,14 +89,38 @@ export default function Bar({
             anchor={RIGHT | TOP}
             application={app}
             layer={Astal.Layer.TOP}
-            $={(self) => onCleanup(() => self.destroy())}
+            $={(self) => {
+                const click = new Gtk.GestureClick()
+                click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                click.connect("pressed", (_gesture, _nPress, x, y) => {
+                    if (!systemMenuOpen() || !toggleNcButton) return
+                    const [ok, bounds] = toggleNcButton.compute_bounds(self)
+                    if (!ok) return
+                    const inside =
+                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
+                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
+                    if (inside) {
+                        forcedToggleAt = Date.now()
+                        closeSystemMenu()
+                        toggleNc()
+                    }
+                })
+                self.add_controller(click)
+                onCleanup(() => self.destroy())
+            }}
         >
-            <MenuButtons toggleNc={toggleNc} />
+            <MenuButtons
+                toggleNc={guardedToggleNc}
+                onToggleNcReady={(w) => { toggleNcButton = w }}
+            />
         </window>,
     ]
 }
 
-function MenuButtons({ toggleNc }: { toggleNc: () => void }) {
+function MenuButtons({ toggleNc, onToggleNcReady }: {
+    toggleNc: () => void
+    onToggleNcReady: (w: Gtk.Widget) => void
+}) {
     const time = createPoll("", 1000, "date '+%a %b %d  %H:%M'")
 
     return (
@@ -97,7 +133,7 @@ function MenuButtons({ toggleNc }: { toggleNc: () => void }) {
                 </box>
                 <SystemMenu />
             </menubutton>
-            <button class="toggle-nc" onclicked={toggleNc}>
+            <button class="toggle-nc" onclicked={toggleNc} $={(self) => onToggleNcReady(self)}>
                 <label class="time" label={time} />
             </button>
             <menubutton class={"powermenu-toggle"}>
