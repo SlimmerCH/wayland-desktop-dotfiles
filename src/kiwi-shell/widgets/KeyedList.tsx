@@ -9,6 +9,8 @@ export function KeyedList<T>({
     enterDuration = 700,
     shouldEnter,
     appendOnly,
+    orientation = Gtk.Orientation.HORIZONTAL,
+    spacing = 0,
 }: {
     each: ReturnType<typeof createComputed<T[]>>
     keyFn: (item: T) => string
@@ -17,9 +19,13 @@ export function KeyedList<T>({
     enterDuration?: number
     shouldEnter?: (item: T) => boolean
     appendOnly?: boolean
+    orientation?: Gtk.Orientation
+    spacing?: number
 }) {
     return (
         <box
+            orientation={orientation}
+            spacing={spacing}
             $={(self: Gtk.Box) => {
                 const widgetMap = new Map<string, Gtk.Widget>()
                 const disposeMap = new Map<string, () => void>()
