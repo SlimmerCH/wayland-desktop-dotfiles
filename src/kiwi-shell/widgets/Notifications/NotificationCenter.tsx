@@ -8,7 +8,6 @@ import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
 import Pango from "gi://Pango"
 import Cairo from "gi://cairo"
-import { timeout } from "ags/time"
 
 import { conf } from "../config"
 
@@ -18,7 +17,6 @@ const APP_ICON_SIZE = 38
 const IMAGE_SIZE = 42
 const MAX_HISTORY = 50
 
-const ENTER_MS = 400
 const EXIT_SLIDE_MS = 250
 const EXIT_COLLAPSE_MS = 200
 const EXIT_TOTAL_MS = EXIT_SLIDE_MS + EXIT_COLLAPSE_MS
@@ -46,7 +44,7 @@ export function closeNc() {
     ncCloseTimer = setTimeout(() => {
         ncCloseTimer = null
         setNcClosing(false)
-    }, NC_SLIDE_MS + 80)
+    }, NC_SLIDE_MS + 150)
 }
 
 export function toggleNc() {
@@ -60,6 +58,25 @@ export function toggleNc() {
         }
         setNcOpen(true)
         setNcClosing(false)
+        // active banners fold into the history list (macOS-style) so animated
+        // banners and the static list never mix while the center is open
+        flushActiveToHistory()
+    }
+}
+
+function flushActiveToHistory() {
+    const current = notifState()
+    const next = new Map(current)
+    let changed = false
+    for (const [id, phase] of current) {
+        if (phase !== "active" && phase !== "closing") continue
+        clearExpiryTimer(id)
+        next.set(id, "expired")
+        changed = true
+    }
+    if (changed) {
+        setNotifState(next)
+        trimHistory()
     }
 }
 
@@ -150,12 +167,22 @@ function clearHistory() {
 notifd.connect("notified", (_, id) => {
     // also fires for replacements: reset phase and expiry, move to the top
     clearExpiryTimer(id)
-    setNotifState(m => {
-        const next = new Map(m)
-        next.delete(id)
-        return new Map([[id, "active" as const], ...next])
-    })
-    scheduleExpiry(id)
+    if (ncOpen()) {
+        // center is open: skip the banner phase, land at the top of the list
+        setNotifState(m => {
+            const next = new Map(m)
+            next.delete(id)
+            return new Map([[id, "expired" as const], ...next])
+        })
+        trimHistory()
+    } else {
+        setNotifState(m => {
+            const next = new Map(m)
+            next.delete(id)
+            return new Map([[id, "active" as const], ...next])
+        })
+        scheduleExpiry(id)
+    }
 })
 
 notifd.connect("resolved", (_, id) => {
@@ -213,9 +240,12 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
         get(activeNotifs).length > 0 && (get(ncOpen) || !get(dnd))
     )
 
-    // While the center is open (or sliding out) the window covers the whole
-    // usable screen: the transparent area acts as a backdrop so a click
-    // anywhere else closes it. With banners only, it hugs the top-right corner.
+    // While the center is open the window covers the whole usable screen: the
+    // transparent area acts as a backdrop so a click anywhere else closes it.
+    // The moment closing starts it snaps back to the corner-anchored mode the
+    // banners use — the backdrop stops eating input right away, and the
+    // slide-out plays in a small surface (the fullscreen one tended to stop
+    // getting frames mid-animation, freezing the panel half-out).
     const ncShown = createComputed(get => get(ncOpen) || get(ncClosing))
 
     let panelRef: Gtk.Widget | null = null
@@ -235,7 +265,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             class={conf.as(conf => `Notifications theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
             exclusivity={Astal.Exclusivity.NORMAL}
-            anchor={ncShown.as(shown => shown ? TOP | RIGHT | BOTTOM | LEFT : TOP | RIGHT)}
+            anchor={ncOpen.as(open => open ? TOP | RIGHT | BOTTOM | LEFT : TOP | RIGHT)}
             keymode={ncOpen.as(open => open ? Astal.Keymode.ON_DEMAND : Astal.Keymode.NONE)}
             application={app}
             layer={Astal.Layer.TOP}
@@ -426,14 +456,14 @@ function Notification({ n }: { n: Notifd.Notification }) {
                 }
                 const unsub = phase.subscribe(() => {
                     if (phase() === "closing") {
-                        wrap?.add_css_class("slide-out")
+                        wrap?.add_css_class("offscreen")
                         setTimeout(() => {
                             if (notifState().get(n.id) === "closing")
                                 self.set_reveal_child(false)
                         }, EXIT_SLIDE_MS)
                     } else if (phase() === "active") {
                         // replaced while closing: bring it back
-                        wrap?.remove_css_class("slide-out")
+                        wrap?.remove_css_class("offscreen")
                         self.set_reveal_child(true)
                     }
                 })
@@ -444,9 +474,18 @@ function Notification({ n }: { n: Notifd.Notification }) {
                 class="notification-wrap"
                 $={(self) => {
                     wrap = self
+                    // enter/exit use a transition between .offscreen and resting
+                    // state instead of a CSS animation: transitions only run on
+                    // state changes, so a surface remap (e.g. the center's
+                    // anchor flip) can never replay them
                     if (isNew) {
-                        self.add_css_class("slide-in")
-                        timeout(ENTER_MS, () => self.remove_css_class("slide-in"))
+                        self.add_css_class("offscreen")
+                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                            if (notifState().get(n.id) !== "closing") {
+                                self.remove_css_class("offscreen")
+                            }
+                            return GLib.SOURCE_REMOVE
+                        })
                     }
                 }}
             >
