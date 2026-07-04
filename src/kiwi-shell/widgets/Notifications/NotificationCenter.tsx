@@ -7,7 +7,6 @@ import GioUnix from "gi://GioUnix"
 import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
 import Pango from "gi://Pango"
-import Cairo from "gi://cairo"
 
 import { conf } from "../config"
 
@@ -41,10 +40,13 @@ export function closeNc() {
     setNcClosing(true)
     setNcOpen(false)
     if (ncCloseTimer) clearTimeout(ncCloseTimer)
+    // unmap right after the slide finishes: a mapped-but-static window can
+    // only accumulate trouble (frozen frame clock leaves a stale sliver on
+    // screen until unmap — hiding is what thaws it, so hide promptly)
     ncCloseTimer = setTimeout(() => {
         ncCloseTimer = null
         setNcClosing(false)
-    }, NC_SLIDE_MS + 600)
+    }, NC_SLIDE_MS + 60)
 }
 
 export function toggleNc() {
@@ -307,8 +309,15 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             application={app}
             layer={Astal.Layer.OVERLAY}
             $={(self) => {
+                // The surface must stay completely undisturbed while the close
+                // slide runs: no resizes, no input-region changes, no forced
+                // redraws. Any of those emit extra commits, and a commit whose
+                // frame callback the compositor drops freezes GTK's frame clock
+                // mid-transition. The window unmaps 60ms after the slide, so
+                // deferred work just waits for that.
                 const shrinkToFit = () => {
                     GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        if (ncClosing()) return GLib.SOURCE_REMOVE
                         self.set_default_size(-1, -1)
                         self.queue_resize()
                         return GLib.SOURCE_REMOVE
@@ -316,49 +325,19 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 }
                 const unsub = notifState.subscribe(shrinkToFit)
                 const unsubResize = resizeTick.subscribe(shrinkToFit)
-
-                // while the cards slide out, the window still covers their old
-                // spot — make it click-through until it unmaps
-                const updateInputRegion = () => {
-                    const surface = self.get_surface()
-                    if (!surface) return
-                    if (ncClosing() && !ncOpen()) {
-                        surface.set_input_region(new Cairo.Region())
-                    } else {
-                        surface.set_input_region(null)
-                    }
-                }
-                const unsubOpen = ncOpen.subscribe(updateInputRegion)
-                const unsubClosing = ncClosing.subscribe(updateInputRegion)
-
-                // Damage heartbeat while flying out: if the compositor stops
-                // sending frame callbacks (nothing "changed" from its POV), the
-                // GTK frame clock stalls and CSS transitions freeze mid-flight.
-                // Forcing a redraw from a plain GLib timer keeps frames coming.
-                let heartbeat: number | null = null
-                const unsubHeartbeat = ncClosing.subscribe(() => {
-                    if (!ncClosing() || heartbeat !== null) return
-                    heartbeat = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 33, () => {
-                        if (!ncClosing()) {
-                            heartbeat = null
-                            return GLib.SOURCE_REMOVE
-                        }
-                        self.queue_draw()
-                        return GLib.SOURCE_CONTINUE
-                    })
+                const unsubClosing = ncClosing.subscribe(() => {
+                    if (!ncClosing()) shrinkToFit()
                 })
 
                 onCleanup(() => {
-                    unsubHeartbeat()
-                    if (heartbeat !== null) GLib.source_remove(heartbeat)
                     unsub()
                     unsubResize()
-                    unsubOpen()
                     unsubClosing()
                     self.destroy()
                 })
             }}
         >
+            <overlay>
             <scrolledwindow
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.AUTOMATIC}
@@ -402,20 +381,35 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                             if (ncOpen()) {
                                 GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                                     if (!ncOpen()) return GLib.SOURCE_REMOVE
+                                    // title and cards slide in together
                                     self.set_reveal_child(true)
-                                    setTimeout(() => {
-                                        if (ncOpen()) headerBox?.remove_css_class("offscreen")
-                                    }, 120)
+                                    headerBox?.remove_css_class("offscreen")
                                     return GLib.SOURCE_REMOVE
                                 })
                             } else {
+                                // horizontal slide-out only — collapsing the
+                                // revealer here would resize the surface every
+                                // frame mid-close, and each configure can stall
+                                // the frame clock (the freeze). The vertical
+                                // collapse is invisible anyway once the content
+                                // is off to the right.
                                 headerBox?.add_css_class("offscreen")
-                                setTimeout(() => {
-                                    if (!ncOpen()) self.set_reveal_child(false)
-                                }, 100)
                             }
                         })
-                        onCleanup(unsub)
+                        // reset the reveal state only after the close finished
+                        // and the revealer is unmapped: unmapped widgets don't
+                        // animate, so this is instant and invisible
+                        const unsubClosing = ncClosing.subscribe(() => {
+                            if (ncClosing() || ncOpen()) return
+                            GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                                if (!ncOpen()) self.set_reveal_child(false)
+                                return GLib.SOURCE_REMOVE
+                            })
+                        })
+                        onCleanup(() => {
+                            unsub()
+                            unsubClosing()
+                        })
                     }}
                 >
                     <box class="nc-header offscreen">
@@ -435,6 +429,20 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
                 </box>
             </box>
             </scrolledwindow>
+            {/* invisible animated pixel: while the close slide runs it keeps
+                every frame carrying real damage, so the compositor keeps
+                answering frame callbacks and the clock can't starve */}
+            <box
+                $type="overlay"
+                class="nc-damage-beacon"
+                visible={ncClosing}
+                canTarget={false}
+                halign={Gtk.Align.END}
+                valign={Gtk.Align.START}
+                widthRequest={2}
+                heightRequest={2}
+            />
+            </overlay>
         </window>
     ), <NcBackdrop gdkmonitor={gdkmonitor} />]
 }
@@ -509,12 +517,17 @@ function Notification({ n }: { n: Notifd.Notification }) {
                     } else if (p === "expired" && !ncOpen()) {
                         // parked offscreen, ready to slide in when the center opens
                         wrap.add_css_class("offscreen")
-                    } else if (p === "active" || p === "expired") {
+                    } else if (p === "active") {
                         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                            const cur = notifState().get(n.id)
-                            const shouldShow = cur === "active" ||
-                                (cur === "expired" && ncOpen())
-                            if (shouldShow && wrap) {
+                            if (notifState().get(n.id) === "active" && wrap) {
+                                wrap.remove_css_class("offscreen")
+                                self.set_reveal_child(true)
+                            }
+                            return GLib.SOURCE_REMOVE
+                        })
+                    } else if (p === "expired") {
+                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                            if (notifState().get(n.id) === "expired" && ncOpen() && wrap) {
                                 wrap.remove_css_class("offscreen")
                                 self.set_reveal_child(true)
                             }

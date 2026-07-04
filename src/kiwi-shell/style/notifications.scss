@@ -4,6 +4,18 @@
     background: rgba(0, 0, 0, 0.01);
 }
 
+// visually imperceptible, but forces a repaint with real damage every frame
+// while it is mapped (only during the close slide)
+.nc-damage-beacon {
+    background-color: rgba(0, 0, 0, 0.02);
+    animation: nc-beacon 100ms linear infinite alternate;
+}
+
+@keyframes nc-beacon {
+    from { opacity: 0.5; }
+    to   { opacity: 1; }
+}
+
 .Notifications {
     margin-top: 4px;
     padding-bottom: 1px;
