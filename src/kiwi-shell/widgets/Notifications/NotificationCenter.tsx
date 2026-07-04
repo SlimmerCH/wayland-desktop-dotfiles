@@ -492,16 +492,14 @@ function Notification({ n }: { n: Notifd.Notification }) {
         <revealer
             transitionType={Gtk.RevealerTransitionType.SLIDE_DOWN}
             transitionDuration={EXIT_COLLAPSE_MS}
-            revealChild={!isNew}
+            revealChild={true}
             visible={cardVisible}
             $={(self) => {
-                if (isNew) {
-                    // start collapsed so neighbors get pushed smoothly, then reveal
-                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        self.set_reveal_child(true)
-                        return GLib.SOURCE_REMOVE
-                    })
-                }
+                // New cards claim their space instantly (revealed from the
+                // start) and only animate via transforms, like the dock: a
+                // revealer growing the slot re-allocates the card every frame
+                // while the surface resize lags behind, visibly squishing it.
+                // The revealer still animates the collapse on exit.
 
                 // Single slide driver for every card state. Sliding in is
                 // deferred one idle so a freshly-mapped card still transitions.
