@@ -1,3 +1,9 @@
+// a fully transparent surface renders nothing and won't reliably receive
+// clicks — same 1% alpha trick as the dock's edge sensor
+.nc-backdrop {
+    background: rgba(0, 0, 0, 0.01);
+}
+
 .Notifications {
     margin-top: 4px;
     padding-bottom: 1px;

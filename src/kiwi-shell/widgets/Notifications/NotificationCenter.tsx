@@ -256,7 +256,15 @@ function NcBackdrop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             $={(self) => {
                 const click = new Gtk.GestureClick()
                 click.set_button(0)
-                click.connect("pressed", () => closeNc())
+                // close on release, deferred one idle: hiding the backdrop in
+                // the middle of its own press breaks GTK's active-state
+                // accounting ("Broken accounting of active state" warnings)
+                click.connect("released", () => {
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        closeNc()
+                        return GLib.SOURCE_REMOVE
+                    })
+                })
                 self.add_controller(click)
 
                 const key = new Gtk.EventControllerKey()
