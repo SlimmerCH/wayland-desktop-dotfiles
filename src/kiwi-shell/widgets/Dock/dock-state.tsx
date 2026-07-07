@@ -59,6 +59,35 @@ export function isValidClient(client: any): boolean {
     return cls !== "" || title !== ""
 }
 
+// ─── Minimize (special-workspace scratchpad) ──────────────────────────────────
+
+export const MINIMIZED_WS = "special:minimized"
+
+// Astal strips the leading 0x from client addresses, but Hyprland's
+// address: window selector requires it
+const addr = (client: Hyprland.Client) => `address:0x${client.address}`
+
+export function isMinimized(client: Hyprland.Client): boolean {
+    return client.workspace?.name === MINIMIZED_WS
+}
+
+// visible = on the active workspace of some monitor
+export function isClientVisible(client: Hyprland.Client): boolean {
+    const wsId = client.workspace?.id
+    if (wsId === undefined) return false
+    return hyprland.get_monitors().some(m => m.activeWorkspace?.id === wsId)
+}
+
+export function minimizeClient(client: Hyprland.Client) {
+    hyprland.dispatch("movetoworkspacesilent", `${MINIMIZED_WS},${addr(client)}`)
+}
+
+export function restoreClient(client: Hyprland.Client) {
+    // movetoworkspace (non-silent) also focuses the window, so it lands on
+    // the current workspace ready to use
+    hyprland.dispatch("movetoworkspace", `${hyprland.focusedWorkspace.id},${addr(client)}`)
+}
+
 export const unpinnedList = createComputed(get => {
     get(mapVersion) // reactive dependency — re-runs when maps rebuild
     const clients = get(createBinding(hyprland, "clients"))

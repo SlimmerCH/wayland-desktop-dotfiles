@@ -61,6 +61,11 @@
     padding: 2.5px;
     border-radius: 100%;
     background-color: #fff;
+    transition: background-color 175ms ease;
+
+    &.minimized {
+        background-color: rgba(255, 255, 255, 0.35);
+    }
 }
 
 .app-context-menu {

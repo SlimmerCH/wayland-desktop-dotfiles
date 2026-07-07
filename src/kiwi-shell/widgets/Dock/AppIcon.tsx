@@ -1,6 +1,7 @@
 import { Gtk } from "ags/gtk4"
 import { createState, createComputed, createBinding, For } from "ags"
-import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT } from "./dock-state"
+import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT, MINIMIZED_WS, isMinimized, isClientVisible, minimizeClient, restoreClient } from "./dock-state"
+import Hyprland from "gi://AstalHyprland"
 import { DockContextIcon } from "./dock-utils"
 import { iconForEntry, AppIconImage } from "../appIcon"
 import { conf } from "../config"
@@ -51,14 +52,27 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
         <box class="app-icon-container">
             <button
                 onclicked={() => {
-                    const client = clientsBinding()[0]
-                    if (client) {
-                        client.focus()
-                    } else {
+                    const clients = clientsBinding()
+                    if (clients.length === 0) {
                         setJumping(true)
                         setTimeout(() => setJumping(false), JUMP_ANIMATION_CLASS_TIMEOUT + 100)
                         application.launch([], null)
+                        return
                     }
+                    const visible = clients.filter(isClientVisible)
+                    if (visible.length > 0) {
+                        // visible → stash in the minimized scratchpad
+                        for (const c of visible) minimizeClient(c)
+                        return
+                    }
+                    const minimized = clients.filter(isMinimized)
+                    if (minimized.length > 0) {
+                        // bring every minimized window back to the current workspace
+                        for (const c of minimized) restoreClient(c)
+                        return
+                    }
+                    // running on another (non-visible) workspace → jump to it
+                    clients[0].focus()
                 }}
                 $={(self) => {
                     const gesture = new Gtk.GestureClick()
@@ -80,7 +94,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                             <box vexpand={true}></box>
                             <box class="client-dots" halign={Gtk.Align.CENTER} spacing={3}>
                                 <For each={clientsBinding}>
-                                    {(_client) => <ActiveClientDot />}
+                                    {(client) => <ActiveClientDot client={client} />}
                                 </For>
                             </box>
                         </box>
@@ -91,9 +105,12 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     )
 }
 
-function ActiveClientDot() {
+function ActiveClientDot({ client }: { client: Hyprland.Client }) {
+    const workspace = createBinding(client, "workspace")
     return (
-        <box class="active-client-dot" />
+        <box class={workspace.as(ws =>
+            ws?.name === MINIMIZED_WS ? "active-client-dot minimized" : "active-client-dot"
+        )} />
     )
 }
 
