@@ -6,7 +6,7 @@ import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
 import { playSound } from "../sound"
 import { captureWindowToTexture } from "./clientCachingService"
-import { isValidClient, isMinimized, restoreClient } from "../Dock/dock-state"
+import { isValidClient, isMinimized, restoreClient, focusClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 
 export const [isVisible, setVisibility] = createState(false)
@@ -164,7 +164,7 @@ function executeSelectedAndClose() {
         // focusing a minimized window would pull the special workspace into
         // view — bring the window to the current workspace instead
         if (isMinimized(selected)) restoreClient(selected)
-        else selected.focus()
+        else focusClient(selected)
     }
     setVisibility(false)
 }

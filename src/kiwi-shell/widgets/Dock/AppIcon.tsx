@@ -1,7 +1,7 @@
 import { Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createBinding, createEffect, For } from "ags"
 import Pango from "gi://Pango"
-import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT, MINIMIZED_WS, isMinimized, isClientVisible, minimizeClient, restoreClient } from "./dock-state"
+import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT, MINIMIZED_WS, isMinimized, isClientVisible, minimizeClient, restoreClient, focusClient } from "./dock-state"
 import Hyprland from "gi://AstalHyprland"
 import { DockContextIcon } from "./dock-utils"
 import { iconForEntry, entryForClient, AppIconImage } from "../appIcon"
@@ -96,7 +96,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                         restoreClient(client)
                     } else {
                         // running on another (non-visible) workspace → jump to it
-                        client.focus()
+                        focusClient(client)
                     }
                 }}
                 $={(self) => {
@@ -228,7 +228,7 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
                     }
                     popdown()
                     if (isMinimized(client)) restoreClient(client)
-                    else client.focus()
+                    else focusClient(client)
                 })
                 self.add_controller(click)
             }}
