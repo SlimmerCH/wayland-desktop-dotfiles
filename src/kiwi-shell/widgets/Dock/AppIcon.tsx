@@ -120,6 +120,7 @@ function AppContextMenu(entry, clientsBinding, application, icon, name, pinned, 
     return (
         <popover
             autohide={true}
+            hasArrow={false}
             class="app-context-menu"
             $={(self) => {
                 popover = self
