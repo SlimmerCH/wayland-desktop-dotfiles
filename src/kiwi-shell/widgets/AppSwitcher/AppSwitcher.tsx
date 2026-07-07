@@ -243,13 +243,19 @@ export function WindowPreview({ client }: { client: any }) {
                 </box>
             </scrolledwindow>
 
+            {/* sized to the screenshot's aspect ratio explicitly: natural-
+                width propagation can't be used because the flow box measures
+                children unconstrained, where a Picture's natural width is
+                the full screenshot size */}
             <Gtk.ScrolledWindow
                 class="window-preview-container"
                 overflow={Gtk.Overflow.HIDDEN}
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
                 heightRequest={220}
-                propagateNaturalWidth={true}
+                widthRequest={texture.as(t => t
+                    ? Math.min(520, Math.max(120, Math.round(220 * t.get_width() / t.get_height())))
+                    : 260)}
             >
                 <Gtk.Picture
                     canShrink={true}
