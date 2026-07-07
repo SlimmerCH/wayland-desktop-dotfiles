@@ -22,12 +22,15 @@ export function resolveFileManager(): { bin: string; flag: string } {
 
 export function openUri(uri: string) {
     const { bin, flag } = resolveFileManager()
-    GLib.spawn_command_line_async([bin, flag, uri].filter(Boolean).join(" "))
+    // shell-quote: paths/uris may contain spaces
+    GLib.spawn_command_line_async(
+        [bin, flag, GLib.shell_quote(uri)].filter(Boolean).join(" "))
 }
 
 export function openPath(path: string) {
     const { bin, flag } = resolveFileManager()
-    GLib.spawn_command_line_async([bin, flag, path].filter(Boolean).join(" "))
+    GLib.spawn_command_line_async(
+        [bin, flag, GLib.shell_quote(path)].filter(Boolean).join(" "))
 }
 
 export function emptyTrash() {
