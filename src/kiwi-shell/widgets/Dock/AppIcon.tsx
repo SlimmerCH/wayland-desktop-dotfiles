@@ -4,7 +4,7 @@ import Pango from "gi://Pango"
 import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT, MINIMIZED_WS, isMinimized, isClientVisible, minimizeClient, restoreClient } from "./dock-state"
 import Hyprland from "gi://AstalHyprland"
 import { DockContextIcon } from "./dock-utils"
-import { iconForEntry, AppIconImage } from "../appIcon"
+import { iconForEntry, entryForClient, AppIconImage } from "../appIcon"
 import { captureWindowToTexture } from "../AppSwitcher/clientCachingService"
 import { conf } from "../config"
 
@@ -51,10 +51,28 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     const menu = AppContextMenu(entry, clientsBinding, application, icon, name, pinned, onPinChange, setMenuOpen)
     const previews = WindowPreviews(clientsBinding, setMenuOpen)
 
+    // hover lifecycle, taskbar style: linger on the icon to open the
+    // preview flyout, it stays while the pointer is over the icon or the
+    // flyout itself, and closes shortly after leaving both
+    let openTimer: ReturnType<typeof setTimeout> | null = null
+    let closeTimer: ReturnType<typeof setTimeout> | null = null
+    const cancelOpen = () => { if (openTimer) { clearTimeout(openTimer); openTimer = null } }
+    const cancelClose = () => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null } }
+    const scheduleClose = () => {
+        cancelClose()
+        closeTimer = setTimeout(() => previews.popdown(), PREVIEW_HOVER_CLOSE_MS)
+    }
+    const previewsMotion = new Gtk.EventControllerMotion()
+    previewsMotion.connect("enter", () => cancelClose())
+    previewsMotion.connect("leave", () => scheduleClose())
+    previews.add_controller(previewsMotion)
+
     return (
         <box class="app-icon-container">
             <button
                 onclicked={() => {
+                    cancelOpen()
+                    cancelClose()
                     const clients = clientsBinding()
                     if (clients.length === 0) {
                         setJumping(true)
@@ -68,6 +86,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                         previews.popup()
                         return
                     }
+                    previews.popdown()
                     const client = clients[0]
                     if (isClientVisible(client)) {
                         // visible → stash in the minimized scratchpad
@@ -84,9 +103,25 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                     const gesture = new Gtk.GestureClick()
                     gesture.set_button(3)
                     gesture.connect("released", () => {
+                        previews.popdown()
                         menu.popup()
                     })
                     self.add_controller(gesture)
+
+                    const hover = new Gtk.EventControllerMotion()
+                    hover.connect("enter", () => {
+                        cancelClose()
+                        cancelOpen()
+                        openTimer = setTimeout(() => {
+                            if (clientsBinding().length > 0 && !menu.visible)
+                                previews.popup()
+                        }, PREVIEW_HOVER_OPEN_MS)
+                    })
+                    hover.connect("leave", () => {
+                        cancelOpen()
+                        scheduleClose()
+                    })
+                    self.add_controller(hover)
                 }}
                 class={jumping.as(isJumping => isJumping ? "app-launch-button jumping" : "app-launch-button")}
             >
@@ -112,6 +147,9 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     )
 }
 
+const PREVIEW_HOVER_OPEN_MS = 400
+const PREVIEW_HOVER_CLOSE_MS = 300
+
 // Windows-taskbar-style window picker: one live thumbnail per window of the
 // app, click to focus (or restore, if minimized), ✕ to close.
 function WindowPreviews(
@@ -123,7 +161,9 @@ function WindowPreviews(
 
     return (
         <popover
-            autohide={true}
+            // no grab: it opens on hover and closes on pointer leave, so it
+            // must not swallow clicks meant for the dock or the icon
+            autohide={false}
             hasArrow={false}
             class="dock-previews"
             $={(self) => {
@@ -163,7 +203,6 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
     const address = client.get_address()
     const [texture, setTexture] = createState<Gdk.Texture | null>(null)
     const title = createBinding(client, "title")
-    const workspace = createBinding(client, "workspace")
 
     createEffect(() => {
         if (!pickerOpen()) return
@@ -176,9 +215,7 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
         <box
             orientation={Gtk.Orientation.VERTICAL}
             spacing={4}
-            class={workspace.as(ws =>
-                ws?.name === MINIMIZED_WS ? "dock-preview-item minimized" : "dock-preview-item"
-            )}
+            class="dock-preview-item"
             $={(self) => {
                 // a plain gesture instead of a button: the close button is
                 // nested inside, and its clicks must not activate the window
@@ -197,6 +234,11 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
             }}
         >
             <box class="dock-preview-header" spacing={6}>
+                <AppIconImage
+                    entry={entryForClient(client)}
+                    pixelSize={14}
+                    cssClass="dock-preview-icon"
+                />
                 <label
                     class="dock-preview-title"
                     label={title}
