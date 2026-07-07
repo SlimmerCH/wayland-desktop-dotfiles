@@ -105,8 +105,8 @@ source = ~/.config/kiwi-shell/hypr.conf
 ### App Switcher (Alt+Tab)
 
 Alt+Tab works out of the box — kiwi-shell registers the keybinds automatically
-(and steps aside if your config already binds `ALT+TAB`). The switcher is
-controlled via `kiwictl`, so you can bind custom keys yourself:
+(and steps aside if your config binds `ALT+TAB` to something else). The
+switcher is controlled via `kiwictl`, so you can bind custom keys yourself:
 
 | Command | Description |
 |---|---|

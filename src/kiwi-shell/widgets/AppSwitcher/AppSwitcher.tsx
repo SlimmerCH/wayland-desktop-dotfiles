@@ -29,20 +29,31 @@ hyprland.connect("notify::focused-client", () => {
 
 // ─── Alt+Tab keybinds ─────────────────────────────────────────────────────────
 // Registers the whole alt-tab submap dynamically so users get working binds
-// out of the box (docs/AppSwitcherKeybinds.md stays the manual route). If any
-// ALT+TAB bind already exists in the root submap — a manual setup or the
-// user's own alt-tab — we leave the keyboard alone. Dynamic keywords are
-// wiped on config reload, so this re-runs on config-reloaded, at which point
-// only config-file binds are visible to the check again.
+// out of the box (docs/AppSwitcherKeybinds.md stays the manual route). If a
+// foreign ALT+TAB or ALT+ALT_L bind exists in the root submap — the user's
+// own alt-tab — we leave the keyboard alone. Kiwictl-flavored binds (from a
+// manual setup per our docs, or a previous shell run) are unbound and
+// re-registered, so fixes to the scheme reach existing setups. Dynamic
+// keywords are wiped on config reload, so this re-runs on config-reloaded.
+//
+// The ALT_L release binds MUST live in the root submap: Hyprland matches a
+// bind against the submap that was active when the key was PRESSED
+// (submapAtPress), and Alt goes down before the submap is entered. The
+// shell-side isVisible guard makes the confirm exec a no-op for all the
+// ordinary Alt releases this fires on.
 
 const ALT_MODMASK = 8
 
 async function registerAltTabBinds() {
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
-        const taken = binds.some((b: any) =>
-            b.key === "TAB" && b.modmask === ALT_MODMASK && b.submap === "")
-        if (taken) return
+        const ours = (b: any) =>
+            (b.dispatcher === "exec" && b.arg.includes("kiwictl apps")) ||
+            (b.dispatcher === "submap" && (b.arg === "app_switcher" || b.arg === "reset"))
+        const foreign = binds.some((b: any) =>
+            (b.key === "TAB" || b.key === "ALT_L") &&
+            b.modmask === ALT_MODMASK && b.submap === "" && !ours(b))
+        if (foreign) return
     } catch (e) {
         console.error("AppSwitcher: failed to query binds, skipping alt-tab setup:", e)
         return
@@ -51,12 +62,23 @@ async function registerAltTabBinds() {
     // one --batch call: the submap keyword is stateful (it brackets which
     // submap the following binds land in), so order must be guaranteed
     execAsync(["hyprctl", "--batch", [
+        // clear any previous incarnation of the scheme first
+        "keyword unbind ALT, TAB",
+        "keyword unbind ALT, ALT_L",
+        "keyword submap app_switcher",
+        "keyword unbind ALT, TAB",
+        "keyword unbind ALT, ALT_L",
+        "keyword unbind , escape",
+        "keyword unbind ALT, escape",
+        "keyword submap reset",
+        // root: entry, and the Alt-release confirm (see comment above)
         "keyword bind ALT, TAB, exec, kiwictl apps open-next",
         "keyword bind ALT, TAB, submap, app_switcher",
-        "keyword submap app_switcher",
-        "keyword binde ALT, TAB, exec, kiwictl apps open-next",
         "keyword bindrt ALT, ALT_L, exec, kiwictl apps confirm",
         "keyword bindrt ALT, ALT_L, submap, reset",
+        // submap: cycling while held, escape failsafes
+        "keyword submap app_switcher",
+        "keyword binde ALT, TAB, exec, kiwictl apps open-next",
         "keyword bindr , escape, exec, kiwictl apps close",
         "keyword bindr , escape, submap, reset",
         "keyword bindr ALT, escape, exec, kiwictl apps close",
@@ -133,6 +155,9 @@ function selectPreviousClient() {
 }
 
 function executeSelectedAndClose() {
+    // the root-submap alt-release bind fires this on every plain Alt
+    // release — only act when the switcher is actually open
+    if (!isVisible()) return
     const clients = displayedClients()
     const selected = clients.find(c => c.get_address() === selectedAddress())
     if (selected) {
