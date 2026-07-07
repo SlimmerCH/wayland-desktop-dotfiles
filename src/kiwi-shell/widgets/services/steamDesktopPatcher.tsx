@@ -1,5 +1,6 @@
 import GLib from "gi://GLib"
 import Gio from "gi://Gio"
+import { logDebug } from "../../debug"
 
 const APPLICATIONS_DIR = `${GLib.get_home_dir()}/.local/share/applications`
 const RUNGAMEID_REGEX = /Exec=steam steam:\/\/rungameid\/(\d+)/
@@ -92,5 +93,5 @@ export default function steamDesktopPatcher(): void {
     monitor.connect("changed", handleFileEvent)
     ;(globalThis as any).__steamDesktopMonitor = monitor
 
-    console.log("[SteamPatcher] Watching", APPLICATIONS_DIR)
+    logDebug("[SteamPatcher] Watching", APPLICATIONS_DIR)
 }

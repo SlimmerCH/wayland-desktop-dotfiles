@@ -6,6 +6,7 @@ import { exec } from "ags/process"
 
 import { Icon, BluetoothDeviceIcon } from "../../../iconNames"
 import { KeyedList } from "../../../KeyedList"
+import { logDebug } from "../../../../debug"
 import { bluetoothTabOpen } from "../SystemMenu"
 
 function hasBluetoothAdapter(): boolean {
@@ -222,11 +223,11 @@ function DeviceContextMenu(device, connectedBinding, pairedBinding) {
 }
 
 function connectDevice(device) {
-  console.log("Connecting to", device.name)
+  logDebug("Connecting to", device.name)
   device.connect_device((source, result) => {
     try {
       device.connect_device_finish(result)
-      console.log("Connected successfully!")
+      logDebug("Connected successfully!")
     } catch (err) {
       console.error("Connect failed:", err)
     }
@@ -234,11 +235,11 @@ function connectDevice(device) {
 }
 
 function disconnectDevice(device) {
-  console.log("Disconnecting from", device.name)
+  logDebug("Disconnecting from", device.name)
   device.disconnect_device((source, result) => {
     try {
       device.disconnect_device_finish(result)
-      console.log("Disconnected successfully!")
+      logDebug("Disconnected successfully!")
     } catch (err) {
       console.error("Disconnect failed:", err)
     }
@@ -246,7 +247,7 @@ function disconnectDevice(device) {
 }
 
 function pairDevice(device) {
-  console.log("Pairing with", device.name)
+  logDebug("Pairing with", device.name)
   device.pair()
   device.trusted = true
   connectDevice(device)
@@ -254,7 +255,7 @@ function pairDevice(device) {
 
 function forgetDevice(device) {
   try {
-    console.log("Removing device", device.name)
+    logDebug("Removing device", device.name)
     adapter?.remove_device(device)
   } catch (error) {
     console.error("Failed to remove device:", error)

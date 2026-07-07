@@ -75,7 +75,6 @@ function TrayIcon({item}){
 }
 
 function trayIconName(name: string) {
-    console.log(name)
     switch (name) {
         case 'spotify-linux-32':
             return 'com.spotify.Client-symbolic'

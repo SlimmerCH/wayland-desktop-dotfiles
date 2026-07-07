@@ -4,6 +4,7 @@ import { exec, execAsync } from "ags/process"
 import Gio from "gi://Gio"
 
 import { conf, setConf, writeConf } from "../../../config"
+import { logDebug } from "../../../../debug"
 import { Icon } from "../../../iconNames";
 
 function getCurrentWallpaper(connector?: string): string | null {
@@ -19,7 +20,7 @@ function getCurrentWallpaper(connector?: string): string | null {
         return match ? match[1].trim() : null
     } catch (error) {
         execAsync("awww-daemon").catch(() => {})
-        console.log("awww daemon not running, starting...")
+        logDebug("awww daemon not running, starting...")
     }
     return null
 }
@@ -40,11 +41,11 @@ function setupWallpaperPolling() {
     }
     
     if (!retryInterval) {
-        console.log("Starting wallpaper polling...")
+        logDebug("Starting wallpaper polling...")
         retryInterval = setInterval(() => {
             const path = getCurrentWallpaper()
             if (path) {
-                console.log("Successfully connected to awww daemon")
+                logDebug("Successfully connected to awww daemon")
                 storeWallpaperPath(path)
                 clearInterval(retryInterval!)
                 retryInterval = null
