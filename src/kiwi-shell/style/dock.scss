@@ -143,8 +143,6 @@
 .dock-preview-shot {
     border-radius: 6px;
     background-color: rgba(255, 255, 255, 0.04);
-    // keeps the card from collapsing while no capture is available yet
-    min-width: 120px;
 }
 
 .dock-preview-close {

@@ -212,16 +212,18 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
                     <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
                 </button>
             </box>
-            {/* fixed-height scroll-less viewport, like the app switcher:
-                a Picture's natural size is the full screenshot, so it must
-                sit in a scrollable to be capped at thumbnail size */}
+            {/* fixed-size scroll-less viewport: a Picture's natural size is
+                the full screenshot, so it must sit in a scrollable to be
+                capped at thumbnail size. Unlike the app switcher there is no
+                fullscreen window constraining the cards, so the width must be
+                fixed too — natural width would blow up to the screenshot's */}
             <Gtk.ScrolledWindow
                 class="dock-preview-shot"
                 overflow={Gtk.Overflow.HIDDEN}
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
+                widthRequest={192}
                 heightRequest={112}
-                propagateNaturalWidth={true}
             >
                 <Gtk.Picture
                     canShrink={true}
