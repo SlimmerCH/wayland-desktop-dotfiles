@@ -88,6 +88,35 @@ export function restoreClient(client: Hyprland.Client) {
     hyprland.dispatch("movetoworkspace", `${hyprland.focusedWorkspace.id},${addr(client)}`)
 }
 
+// ─── Focus-steal guard ────────────────────────────────────────────────────────
+// With focus_on_activate, external activations (xdg-open behind the dock's
+// home/trash buttons, single-instance file managers, links opening in a
+// minimized browser, …) can focus a minimized window, which drags the whole
+// special workspace into view. Treat any focus landing on a minimized window
+// as "restore it": pull it to the last real workspace, then close the
+// overlay that is left showing the remaining minimized windows.
+
+let lastNormalWs = hyprland.focusedWorkspace?.id ?? 1
+hyprland.connect("notify::focused-workspace", () => {
+    const id = hyprland.focusedWorkspace?.id
+    if (id !== undefined && id > 0) lastNormalWs = id
+})
+
+hyprland.connect("notify::focused-client", () => {
+    const client = hyprland.focusedClient
+    if (!client || !isMinimized(client)) return
+    hyprland.dispatch("movetoworkspace", `${lastNormalWs},${addr(client)}`)
+    // the overlay state settles asynchronously (socket events), so check
+    // slightly later whether it is still open — it auto-closes only when
+    // the restored window was the last one minimized
+    setTimeout(() => {
+        for (const m of hyprland.get_monitors()) {
+            if (m.specialWorkspace?.name === MINIMIZED_WS)
+                hyprland.dispatch("togglespecialworkspace", "minimized")
+        }
+    }, 150)
+})
+
 export const unpinnedList = createComputed(get => {
     get(mapVersion) // reactive dependency — re-runs when maps rebuild
     const clients = get(createBinding(hyprland, "clients"))
