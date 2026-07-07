@@ -191,11 +191,23 @@ export default function AppSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Monitor })
 function Windows() {
     return (
         <centerbox class="app-switch-menu">
-            <box $type="center" class="app-switch-container" spacing={4}>
+            {/* a flow box wraps previews into additional rows once a line
+                would overflow the screen, instead of shrinking every card */}
+            <Gtk.FlowBox
+                $type="center"
+                class="app-switch-container"
+                halign={Gtk.Align.CENTER}
+                selectionMode={Gtk.SelectionMode.NONE}
+                homogeneous={false}
+                columnSpacing={4}
+                rowSpacing={4}
+                minChildrenPerLine={1}
+                maxChildrenPerLine={10}
+            >
                 <For each={displayedClients}>
                     {(client) => <WindowPreview client={client} />}
                 </For>
-            </box>
+            </Gtk.FlowBox>
         </centerbox>
     )
 }

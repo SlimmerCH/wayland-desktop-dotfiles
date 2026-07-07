@@ -2,6 +2,13 @@
     background-color: rgba(0, 0, 0, 0.8);
     padding: 16px;
     border-radius: 8px;
+
+    // neutralize the implicit FlowBoxChild wrappers around each preview
+    flowboxchild {
+        padding: 0;
+        background: none;
+        border: none;
+    }
 }
 
 .window-preview {
