@@ -1,6 +1,7 @@
 import { Gdk } from "ags/gtk4"
 import AppCapture from "gi://AppCapture?version=1.0"
 import Hyprland from "gi://AstalHyprland"
+import { isMinimized } from "../Dock/dock-state"
 
 // How long a cached texture is considered fresh.
 // Switcher opens under this threshold → instant display, no capture fired.
@@ -47,6 +48,12 @@ function drainQueue() {
 // ─── Core capture ──────────────────────────────────────────────────────────────
 // Internal — enqueues a live capture and updates the cache on success.
 function captureNow(address: string): Promise<Gdk.Texture | null> {
+    // a minimized window is unmapped, so a capture would fail or grab
+    // garbage — serve whatever the cache holds from before it was stashed
+    const client = hyprland.get_clients().find(c => c.get_address() === address)
+    if (client && isMinimized(client))
+        return Promise.resolve(cache.get(address)?.texture ?? null)
+
     return new Promise((resolve) => {
         captureQueue.push(() => {
             activeCapture = true
