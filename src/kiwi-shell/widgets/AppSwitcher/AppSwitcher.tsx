@@ -8,6 +8,7 @@ import { playSound } from "../sound"
 import { captureWindowToTexture } from "./clientCachingService"
 import { isValidClient, isMinimized, restoreClient, focusClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
+import { popupGdkMonitor } from "../monitors"
 
 export const [isVisible, setVisibility] = createState(false)
 export const [selectedAddress, setSelectedAddress] = createState<string | null>(null)
@@ -177,7 +178,7 @@ export default function AppSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Monitor })
             visible={isVisible}
             name="ags-app-switcher"
             class={conf.as((conf: any) => `AppSwitcher theme-${conf.theme}`)}
-            gdkmonitor={gdkmonitor}
+            gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
             exclusivity={Astal.Exclusivity.NORMAL}
             anchor={Astal.WindowAnchor.CENTER | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT}
             application={app}
@@ -205,7 +206,8 @@ function Windows({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     // hand: card widths are known upfront, and GtkFlowBox is a grid in
     // disguise — it stretches cards to uniform column widths.
     const rows = createComputed(get => {
-        const budget = gdkmonitor.get_geometry().width * 0.92
+        const monitor = get(popupGdkMonitor) ?? gdkmonitor
+        const budget = monitor.get_geometry().width * 0.92
         const chunks: any[][] = []
         let row: any[] = []
         let width = 0

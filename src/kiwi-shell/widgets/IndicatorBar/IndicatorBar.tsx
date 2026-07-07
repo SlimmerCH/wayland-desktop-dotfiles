@@ -11,6 +11,7 @@ import { conf } from "../config"
 import { brightness, setBrightnessLevel, kbdBrightness, kbdAvailable, brightnessAvailable } from "../brightness"
 import { systemTabOpen } from "../Bar/SystemMenu/SystemMenu"
 import { watchIndicatorKeys } from "../inputWatcher"
+import { popupGdkMonitor } from "../monitors"
 
 const fadeTimeout = 2500
 
@@ -101,7 +102,7 @@ export default function IndicatorBar({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }
       class={conf.as(conf =>
         `IndicatorBar theme-${conf.theme} ${conf.indicator_bar_position}`
       )}
-      gdkmonitor={gdkmonitor}
+      gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
       exclusivity={Astal.Exclusivity.NORMAL}
       anchor={conf.as(conf =>
         conf.indicator_bar_position == "left" ? Astal.WindowAnchor.LEFT : Astal.WindowAnchor.BOTTOM

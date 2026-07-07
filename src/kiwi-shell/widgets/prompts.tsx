@@ -8,6 +8,7 @@ import { conf } from "./config"
 import Hyprland from "gi://AstalHyprland"
 import { Icon } from "./iconNames"
 import { playSound } from "./sound";
+import { popupGdkMonitor } from "./monitors"
 
 export default function Prompt({ gdkmonitor, onSetup }: { gdkmonitor: Gdk.Monitor }) {
     return (
@@ -21,7 +22,7 @@ export default function Prompt({ gdkmonitor, onSetup }: { gdkmonitor: Gdk.Monito
             class={conf.as(conf =>
                 `Prompt theme-${conf.theme}`
             )}
-            gdkmonitor={gdkmonitor}
+            gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
             exclusivity={Astal.Exclusivity.IGNORE}
             anchor={Astal.WindowAnchor.LEFT | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.RIGHT | Astal.WindowAnchor.TOP}
             visible={showPrompt}

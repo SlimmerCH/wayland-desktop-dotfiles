@@ -8,6 +8,7 @@ import Apps from "gi://AstalApps"
 import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
 import { mapVersion } from "../desktopEntries"
+import { popupGdkMonitor } from "../monitors"
 
 // Spotlight-style launcher: a centered glass search panel on Super+Space.
 // Type to fuzzy-search applications, arrows/Tab to select, Enter to launch,
@@ -166,7 +167,8 @@ function ResultRow({ application, index }: {
 export default function Launcher({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     // spotlight sits in the upper part of the screen, top edge fixed so the
     // panel only ever grows downwards while results appear
-    const marginTop = Math.round(gdkmonitor.get_geometry().height * 0.22)
+    const marginTop = createComputed(get =>
+        Math.round((get(popupGdkMonitor) ?? gdkmonitor).get_geometry().height * 0.22))
     let panelRef: Gtk.Box
 
     return (
@@ -175,7 +177,7 @@ export default function Launcher({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             visible={isVisible}
             name="ags-launcher"
             class={conf.as((conf: any) => `Launcher theme-${conf.theme}`)}
-            gdkmonitor={gdkmonitor}
+            gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
             exclusivity={Astal.Exclusivity.IGNORE}
             anchor={Astal.WindowAnchor.TOP | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT}
             application={app}

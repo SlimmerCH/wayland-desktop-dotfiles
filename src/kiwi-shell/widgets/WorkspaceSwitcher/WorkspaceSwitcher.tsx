@@ -1,11 +1,12 @@
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
-import { createState, createEffect, For } from "ags"
+import { createState, createComputed, createEffect, For } from "ags"
 import { execAsync } from "ags/process"
 import Hyprland from "gi://AstalHyprland"
 import { isValidClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 import { conf } from "../config"
+import { popupGdkMonitor } from "../monitors"
 
 const hyprland = Hyprland.get_default()
 
@@ -135,7 +136,7 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
             visible={isVisible}
             name="ags-workspace-switcher"
             class={conf.as((conf: any) => `WorkspaceSwitcher theme-${conf.theme}`)}
-            gdkmonitor={gdkmonitor}
+            gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
             exclusivity={Astal.Exclusivity.NORMAL}
             anchor={Astal.WindowAnchor.CENTER | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT}
             application={app}
@@ -161,8 +162,9 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
 // layout, built from live client geometry, one rounded rect + app icon per
 // window.
 function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor }) {
-    const geo = gdkmonitor.get_geometry()
-    const width = Math.round(CARD_HEIGHT * geo.width / geo.height)
+    // geometry is read per open inside the effect below — the popup can
+    // land on a different monitor each time
+    const [width, setWidth] = createState(Math.round(CARD_HEIGHT * 16 / 9))
     const [entries, setEntries] = createState<string[]>([])
     const [empty, setEmpty] = createState(true)
 
@@ -186,6 +188,9 @@ function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor
                     $={(self: Gtk.Fixed) => {
                         createEffect(() => {
                             if (!isVisible()) return
+                            const geo = (popupGdkMonitor() ?? gdkmonitor).get_geometry()
+                            const cardWidth = Math.round(CARD_HEIGHT * geo.width / geo.height)
+                            setWidth(cardWidth)
                             const clients = wsClients().get(id) ?? []
                             setEntries([...new Set(clients.map(entryForClient))])
                             setEmpty(clients.length === 0)
@@ -197,7 +202,7 @@ function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor
                                 child = next
                             }
                             for (const c of clients) {
-                                const w = Math.max(6, Math.round(c.get_width() * width / geo.width))
+                                const w = Math.max(6, Math.round(c.get_width() * cardWidth / geo.width))
                                 const h = Math.max(6, Math.round(c.get_height() * CARD_HEIGHT / geo.height))
                                 const icon = Math.max(8, Math.min(20, Math.round(Math.min(w, h) * 0.55)))
                                 self.put(
@@ -217,7 +222,7 @@ function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor
                                             </box>
                                         </overlay>
                                     ) as Gtk.Widget,
-                                    Math.round(c.get_x() * width / geo.width),
+                                    Math.round(c.get_x() * cardWidth / geo.width),
                                     Math.round(c.get_y() * CARD_HEIGHT / geo.height),
                                 )
                             }

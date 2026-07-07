@@ -9,6 +9,7 @@ import Hyprland from "gi://AstalHyprland"
 import Pango from "gi://Pango"
 
 import { conf } from "../config"
+import { popupGdkMonitor } from "../monitors"
 
 const DEFAULT_TIMEOUT = 5000
 const NOTIF_WIDTH = 360
@@ -248,7 +249,7 @@ function NcBackdrop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         <window
             name="ags-nc-backdrop"
             class="nc-backdrop"
-            gdkmonitor={gdkmonitor}
+            gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
             visible={ncOpen}
             exclusivity={Astal.Exclusivity.NORMAL}
             anchor={TOP | RIGHT | BOTTOM | LEFT}
@@ -292,9 +293,11 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
 
     // Scroll once the list would leave the viewport: cap the scrolled window at
     // monitor height minus the bar and, when it reserves space, the dock.
-    const maxListHeight = conf.as(c => {
+    const maxListHeight = createComputed(get => {
+        const c = get(conf)
+        const monitor = get(popupGdkMonitor) ?? gdkmonitor
         const dockAllowance = c.dock === "default" ? (c.dock_icon_size ?? 56) + 46 : 0
-        return Math.max(200, gdkmonitor.get_geometry().height - 48 - dockAllowance)
+        return Math.max(200, monitor.get_geometry().height - 48 - dockAllowance)
     })
 
     return [(
@@ -303,7 +306,7 @@ export default function NotificationCenter({ gdkmonitor }: { gdkmonitor: Gdk.Mon
             visible={createComputed(get => get(ncShown) || (get(anyBanner) && !get(dnd)))}
             name="ags-notification-center"
             class={conf.as(conf => `Notifications theme-${conf.theme}`)}
-            gdkmonitor={gdkmonitor}
+            gdkmonitor={createComputed(get => get(popupGdkMonitor) ?? gdkmonitor)}
             exclusivity={Astal.Exclusivity.NORMAL}
             anchor={TOP | RIGHT}
             application={app}

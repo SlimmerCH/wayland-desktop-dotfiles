@@ -156,6 +156,13 @@ your file manager), right-click offers Open / Show in Files / Move to Trash.
 The layer updates live as files come and go. Disable it with the
 `desktop_icons` setting.
 
+### Multi-Monitor
+
+The app and workspace switchers, the launcher, prompts, the
+volume/brightness indicator and notifications appear on the currently
+active monitor, macOS-style. Set `popup_monitor` to `primary` to pin them
+all to your first monitor instead.
+
 ---
 
 ## Icon Theme & Font

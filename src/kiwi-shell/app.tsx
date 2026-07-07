@@ -34,7 +34,8 @@ app.start({
           <This this={app}>
             <Bar gdkmonitor={gdkmonitor} toggleNc={toggleNc} />
             <Dock gdkmonitor={gdkmonitor} />
-            <NotificationCenter gdkmonitor={gdkmonitor} />
+            {/* popups follow popupGdkMonitor — one instance is enough */}
+            {index() === 0 && <NotificationCenter gdkmonitor={gdkmonitor} />}
             {index() === 0 && <Desktop gdkmonitor={gdkmonitor} />}
             {index() === 0 && <IndicatorBar gdkmonitor={gdkmonitor} />}
             {index() === 0 && <AppSwitcher gdkmonitor={gdkmonitor} />}
