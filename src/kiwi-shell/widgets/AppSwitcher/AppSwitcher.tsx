@@ -1,6 +1,6 @@
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
-import { createState, createEffect, For, createBinding } from "ags"
+import { createState, createComputed, createEffect, For, createBinding } from "ags"
 import { execAsync } from "ags/process"
 import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
