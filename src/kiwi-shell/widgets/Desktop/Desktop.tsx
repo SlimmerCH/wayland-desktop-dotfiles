@@ -1,6 +1,6 @@
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
-import { createState, For } from "ags"
+import { createState, For, onCleanup } from "ags"
 import Gio from "gi://Gio"
 import GioUnix from "gi://GioUnix"
 import GLib from "gi://GLib"
@@ -202,7 +202,6 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
 export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     return (
         <window
-            visible={conf.as((conf: any) => conf.desktop_icons)}
             name="ags-desktop"
             class={conf.as((conf: any) => `Desktop theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
@@ -211,6 +210,19 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             application={app}
             layer={Astal.Layer.BOTTOM}
             keymode={Astal.Keymode.NONE}
+            $={(self) => {
+                // visibility is applied AFTER construction, never as a
+                // constructor prop: gnim hands all props to the constructor
+                // in written order, so a window that is visible at construct
+                // time maps before layer/anchor are set and stays on the
+                // default TOP layer — fullscreen, above the dock, eating its
+                // input. Verified live: identical window lands on bottom vs
+                // top purely by prop order.
+                const visible = conf.as((c: any) => !!c.desktop_icons)
+                self.visible = visible()
+                const dispose = visible.subscribe(() => { self.visible = visible() })
+                onCleanup(dispose)
+            }}
         >
             <Gtk.FlowBox
                 class="desktop-icons"
