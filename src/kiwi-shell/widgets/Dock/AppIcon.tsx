@@ -260,20 +260,19 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
                     <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
                 </button>
             </box>
-            {/* scroll-less viewport sized to the screenshot's aspect ratio:
+            {/* scroll-less viewport sized to the window's aspect ratio:
                 a Picture's natural size is the full screenshot, so it must
-                sit in a scrollable to be capped at thumbnail size, and the
-                width is computed from the texture so the tile hugs the
-                image with no letterbox bars */}
+                sit in a scrollable with the thumbnail size requested — the
+                tile then hugs the image with no letterbox bars */}
             <Gtk.ScrolledWindow
                 class="dock-preview-shot"
                 overflow={Gtk.Overflow.HIDDEN}
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
                 heightRequest={112}
-                widthRequest={texture.as(t => t
-                    ? Math.min(300, Math.max(120, Math.round(112 * t.get_width() / t.get_height())))
-                    : 192)}
+                widthRequest={client.get_height() > 0
+                    ? Math.min(300, Math.max(120, Math.round(112 * client.get_width() / client.get_height())))
+                    : 192}
             >
                 <Gtk.Picture
                     canShrink={true}

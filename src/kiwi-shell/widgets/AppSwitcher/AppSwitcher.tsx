@@ -183,31 +183,62 @@ export default function AppSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Monitor })
             application={app}
             layer={Astal.Layer.TOP}
         >
-            <Windows />
+            <Windows gdkmonitor={gdkmonitor} />
         </window>
     )
 }
 
-function Windows() {
+const PREVIEW_HEIGHT = 220
+
+// card width from the window's own geometry: known synchronously, and the
+// screenshot shares the window's aspect ratio anyway
+function previewWidth(client: any): number {
+    const w = client.get_width()
+    const h = client.get_height()
+    return h > 0
+        ? Math.min(520, Math.max(120, Math.round(PREVIEW_HEIGHT * w / h)))
+        : 260
+}
+
+function Windows({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
+    // previews wrap into centered rows instead of shrinking. Chunked by
+    // hand: card widths are known upfront, and GtkFlowBox is a grid in
+    // disguise — it stretches cards to uniform column widths.
+    const rows = createComputed(get => {
+        const budget = gdkmonitor.get_geometry().width * 0.92
+        const chunks: any[][] = []
+        let row: any[] = []
+        let width = 0
+        for (const client of get(displayedClients)) {
+            const w = previewWidth(client)
+            if (row.length > 0 && width + w > budget) {
+                chunks.push(row)
+                row = []
+                width = 0
+            }
+            row.push(client)
+            width += w
+        }
+        if (row.length > 0) chunks.push(row)
+        return chunks
+    })
+
     return (
         <centerbox class="app-switch-menu">
-            {/* a flow box wraps previews into additional rows once a line
-                would overflow the screen, instead of shrinking every card */}
-            <Gtk.FlowBox
+            <box
                 $type="center"
                 class="app-switch-container"
-                halign={Gtk.Align.CENTER}
-                selectionMode={Gtk.SelectionMode.NONE}
-                homogeneous={false}
-                columnSpacing={4}
-                rowSpacing={4}
-                minChildrenPerLine={1}
-                maxChildrenPerLine={10}
+                orientation={Gtk.Orientation.VERTICAL}
+                spacing={4}
             >
-                <For each={displayedClients}>
-                    {(client) => <WindowPreview client={client} />}
+                <For each={rows}>
+                    {(row) => (
+                        <box spacing={4} halign={Gtk.Align.CENTER}>
+                            {row.map(client => <WindowPreview client={client} />)}
+                        </box>
+                    )}
                 </For>
-            </Gtk.FlowBox>
+            </box>
         </centerbox>
     )
 }
@@ -243,19 +274,16 @@ export function WindowPreview({ client }: { client: any }) {
                 </box>
             </scrolledwindow>
 
-            {/* sized to the screenshot's aspect ratio explicitly: natural-
-                width propagation can't be used because the flow box measures
-                children unconstrained, where a Picture's natural width is
-                the full screenshot size */}
+            {/* sized to the window's aspect ratio explicitly: a Picture's
+                natural width is the full screenshot size, so it must sit in
+                a scroll-less viewport with the thumbnail size requested */}
             <Gtk.ScrolledWindow
                 class="window-preview-container"
                 overflow={Gtk.Overflow.HIDDEN}
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
-                heightRequest={220}
-                widthRequest={texture.as(t => t
-                    ? Math.min(520, Math.max(120, Math.round(220 * t.get_width() / t.get_height())))
-                    : 260)}
+                heightRequest={PREVIEW_HEIGHT}
+                widthRequest={previewWidth(client)}
             >
                 <Gtk.Picture
                     canShrink={true}
