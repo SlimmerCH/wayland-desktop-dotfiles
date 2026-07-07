@@ -261,7 +261,7 @@ export function WindowPreview({ client }: { client: any }) {
     const container = (
         <box
             orientation={Gtk.Orientation.VERTICAL}
-            spacing={8}
+            spacing={0}
             class="window-preview"
         >
             <scrolledwindow
