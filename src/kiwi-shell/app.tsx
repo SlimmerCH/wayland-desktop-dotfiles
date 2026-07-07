@@ -5,6 +5,9 @@ import IndicatorBar from "./widgets/IndicatorBar/IndicatorBar"
 import AppSwitcher, {
   toggleAppSwitcher,
 } from "./widgets/AppSwitcher/AppSwitcher"
+import WorkspaceSwitcher, {
+  toggleWorkspaceSwitcher,
+} from "./widgets/WorkspaceSwitcher/WorkspaceSwitcher"
 import Dock from "./widgets/Dock/Dock"
 import { execAsync } from "ags/process"
 import Prompt from "./widgets/prompts"
@@ -36,6 +39,9 @@ app.start({
     } else if (cmd == "apps") {
       toggleAppSwitcher(arg)
       response(``)
+    } else if (cmd == "workspaces") {
+      toggleWorkspaceSwitcher(arg)
+      response(``)
     } else if (cmd == "quit") {
       app.quit()
     } else if (cmd == "debug") {
@@ -62,6 +68,7 @@ app.start({
             <NotificationCenter gdkmonitor={gdkmonitor} />
             {index() === 0 && <IndicatorBar gdkmonitor={gdkmonitor} />}
             {index() === 0 && <AppSwitcher gdkmonitor={gdkmonitor} />}
+            {index() === 0 && <WorkspaceSwitcher gdkmonitor={gdkmonitor} />}
             {index() === 0 && <Prompt gdkmonitor={gdkmonitor} />}
           </This>
         )}
