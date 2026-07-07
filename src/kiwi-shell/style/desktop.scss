@@ -22,6 +22,12 @@
     }
 }
 
+// must actually paint something (see Desktop.tsx) — 1% black on one pixel
+// is invisible on any wallpaper but keeps the render tree non-empty
+.desktop-damage-anchor {
+    background-color: rgba(0, 0, 0, 0.01);
+}
+
 .desktop-item-icon {
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
 }

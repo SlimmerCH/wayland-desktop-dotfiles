@@ -7,19 +7,24 @@ import GLib from "gi://GLib"
 import Pango from "gi://Pango"
 import { conf } from "../config"
 import { openPath } from "../Dock/dock-utils"
+import { logDebug } from "../../debug"
 
 // Desktop icons: the contents of the XDG desktop folder rendered on a
 // BOTTOM-layer surface — above the wallpaper, below every window. Icons
 // flow top-to-bottom into columns like a classic desktop. Double-click
-// opens, right-click offers a small context menu.
+// (or Enter) opens, Delete trashes, right-click offers a context menu.
 
 type DesktopItem = {
     path: string
     name: string
     gicon: Gio.Icon | null
     isDir: boolean
+    contentType: string | null
     appInfo: GioUnix.DesktopAppInfo | null
 }
+
+// FlowBox children back to their items, for selection-based actions
+const itemByBox = new WeakMap<Gtk.Widget, DesktopItem>()
 
 const DESKTOP_DIR =
     GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DESKTOP)
@@ -33,7 +38,7 @@ function readItems(): DesktopItem[] {
 
     const out: DesktopItem[] = []
     const children = dir.enumerate_children(
-        "standard::name,standard::display-name,standard::icon,standard::type,standard::is-hidden",
+        "standard::name,standard::display-name,standard::icon,standard::type,standard::is-hidden,standard::content-type",
         Gio.FileQueryInfoFlags.NONE,
         null,
     )
@@ -53,6 +58,7 @@ function readItems(): DesktopItem[] {
                     name: appInfo.get_display_name() ?? name,
                     gicon: appInfo.get_icon(),
                     isDir: false,
+                    contentType: "application/x-desktop",
                     appInfo,
                 })
                 continue
@@ -64,6 +70,7 @@ function readItems(): DesktopItem[] {
             name: info.get_display_name() ?? name,
             gicon: info.get_icon(),
             isDir: info.get_file_type() === Gio.FileType.DIRECTORY,
+            contentType: info.get_content_type(),
             appInfo: null,
         })
     }
@@ -73,9 +80,23 @@ function readItems(): DesktopItem[] {
         a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name))
 }
 
+let flowBoxRef: Gtk.FlowBox | null = null
+
+function flowBoxChildCount(): number {
+    let n = 0
+    for (let c = flowBoxRef?.get_first_child(); c; c = c.get_next_sibling()) n++
+    return n
+}
+
 function refresh() {
     try {
-        setItems(readItems())
+        const next = readItems()
+        logDebug(`[Desktop] refresh → ${next.length} item(s)`)
+        setItems(next)
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+            logDebug(`[Desktop] flowbox children after refresh: ${flowBoxChildCount()}`)
+            return GLib.SOURCE_REMOVE
+        })
     } catch (e) {
         console.error(`Desktop: failed to list ${DESKTOP_DIR}:`, e)
         setItems([])
@@ -89,7 +110,8 @@ function watchDesktopDir() {
     if (!dir.query_exists(null)) return
 
     const monitor = dir.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, null)
-    monitor.connect("changed", () => {
+    monitor.connect("changed", (_mon, file, _other, eventType) => {
+        logDebug(`[Desktop] fs event ${eventType} on ${file?.get_basename() ?? "?"}`)
         if (refreshTimeout !== null) GLib.source_remove(refreshTimeout)
         refreshTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
             refreshTimeout = null
@@ -128,6 +150,23 @@ function trashItem(item: DesktopItem) {
     }
 }
 
+function openWithDialog(item: DesktopItem) {
+    const file = Gio.File.new_for_path(item.path)
+    const dialog = new Gtk.AppChooserDialog({ gfile: file })
+    dialog.connect("response", (d: Gtk.AppChooserDialog, response: number) => {
+        if (response === Gtk.ResponseType.OK) {
+            const appInfo = d.get_app_info()
+            try {
+                appInfo?.launch([file], null)
+            } catch (e) {
+                console.error(`Desktop: failed to open ${item.path} with ${appInfo?.get_name()}:`, e)
+            }
+        }
+        d.destroy()
+    })
+    dialog.present()
+}
+
 function DesktopIcon({ item }: { item: DesktopItem }) {
     let menu: Gtk.Popover
 
@@ -138,6 +177,8 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
             class="desktop-item"
             widthRequest={90}
             $={(self) => {
+                itemByBox.set(self, item)
+
                 const click = new Gtk.GestureClick()
                 click.set_button(Gdk.BUTTON_PRIMARY)
                 click.connect("pressed", (_gesture, nPress) => {
@@ -164,6 +205,12 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
                         <box spacing={6}>
                             <Gtk.Image iconName="document-open-symbolic" pixelSize={16} />
                             <label halign={Gtk.Align.START} label="Open" />
+                        </box>
+                    </button>
+                    <button onclicked={() => { menu.popdown(); openWithDialog(item) }}>
+                        <box spacing={6}>
+                            <Gtk.Image iconName="system-run-symbolic" pixelSize={16} />
+                            <label halign={Gtk.Align.START} label="Open With…" />
                         </box>
                     </button>
                     <button onclicked={() => { menu.popdown(); openPath(DESKTOP_DIR) }}>
@@ -209,7 +256,9 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             anchor={Astal.WindowAnchor.TOP | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT}
             application={app}
             layer={Astal.Layer.BOTTOM}
-            keymode={Astal.Keymode.NONE}
+            // on-demand: clicking the desktop focuses it (like any desktop),
+            // enabling Delete-to-trash and Enter-to-open on the selection
+            keymode={Astal.Keymode.ON_DEMAND}
             $={(self) => {
                 // visibility is applied AFTER construction, never as a
                 // constructor prop: gnim hands all props to the constructor
@@ -224,6 +273,20 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 onCleanup(dispose)
             }}
         >
+            <overlay>
+            {/* 1×1 near-invisible node: with the last icon removed the window's
+                render tree would be empty and GTK never commits the final
+                cleared frame — the compositor keeps showing the stale icon
+                (verified: 0 flowbox children while the icon stayed on screen) */}
+            <box
+                $type="overlay"
+                class="desktop-damage-anchor"
+                halign={Gtk.Align.START}
+                valign={Gtk.Align.END}
+                widthRequest={1}
+                heightRequest={1}
+                canTarget={false}
+            />
             <Gtk.FlowBox
                 class="desktop-icons"
                 orientation={Gtk.Orientation.VERTICAL}
@@ -236,18 +299,43 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 halign={Gtk.Align.START}
                 valign={Gtk.Align.FILL}
                 $={(self) => {
+                    flowBoxRef = self
+
                     // clicking empty desktop space clears the selection
                     const click = new Gtk.GestureClick()
                     click.connect("pressed", (_gesture, _n, x, y) => {
                         if (!self.get_child_at_pos(x, y)) self.unselect_all()
                     })
                     self.add_controller(click)
+
+                    // Enter opens the selected item (keyboard counterpart of
+                    // the double click)
+                    self.connect("child-activated", (_fb, child: Gtk.FlowBoxChild) => {
+                        const inner = child.get_child()
+                        const item = inner ? itemByBox.get(inner) : undefined
+                        if (item) openItem(item)
+                    })
+
+                    // Delete moves the selected item to trash
+                    const keys = new Gtk.EventControllerKey()
+                    keys.connect("key-pressed", (_controller, keyval) => {
+                        if (keyval !== Gdk.KEY_Delete && keyval !== Gdk.KEY_KP_Delete)
+                            return Gdk.EVENT_PROPAGATE
+                        const child = self.get_selected_children()[0]
+                        const inner = child?.get_child()
+                        const item = inner ? itemByBox.get(inner) : undefined
+                        if (!item) return Gdk.EVENT_PROPAGATE
+                        trashItem(item)
+                        return Gdk.EVENT_STOP
+                    })
+                    self.add_controller(keys)
                 }}
             >
                 <For each={items}>
                     {(item: DesktopItem) => <DesktopIcon item={item} />}
                 </For>
             </Gtk.FlowBox>
+            </overlay>
         </window>
     )
 }
