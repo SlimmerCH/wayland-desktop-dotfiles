@@ -17,23 +17,32 @@ const [displayedIds, setDisplayedIds] = createState<number[]>([])
 // per-workspace client snapshot, taken when the switcher opens
 const [wsClients, setWsClients] = createState<Map<number, Hyprland.Client[]>>(new Map())
 
-// ─── Super+Tab keybind ────────────────────────────────────────────────────────
-// Only the cycle bind lives in the compositor. Confirm (release Super) and
-// abort (Escape) are detected shell-side through the keyboard grab the
-// switcher holds while open — a SUPER_L release bind would collide with
-// launcher-on-super-tap setups (and with the submap-at-press-time rules).
+// ─── Super+Tab keybinds ───────────────────────────────────────────────────────
+// Same architecture as alt-tab, all in the root submap: binde for cycling,
+// a release bind on SUPER_L to confirm (fires on every plain Super release —
+// the shell no-ops it while the switcher is closed), and SUPER+escape to
+// abort. A press bind on SUPER+SUPER_L (launcher-on-super-tap setups) is
+// unrelated to our release bind and keeps working — we never unbind SUPER_L.
 
 const SUPER_MODMASK = 64
 
 async function registerSuperTabBinds() {
+    let haveConfirm = false
+    let haveEscape = false
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
         const ours = (b: any) =>
             b.dispatcher === "exec" && b.arg.includes("kiwictl workspaces")
         const foreign = binds.some((b: any) =>
-            b.key === "TAB" && b.submap === "" && !ours(b) &&
-            (b.modmask === SUPER_MODMASK || b.modmask === (SUPER_MODMASK | 1)))
+            b.submap === "" && !ours(b) && (
+                (b.key === "TAB" && (b.modmask === SUPER_MODMASK || b.modmask === (SUPER_MODMASK | 1))) ||
+                // a foreign *release* bind on super itself (a press bind,
+                // like tap-to-launch, is fine)
+                (b.key === "SUPER_L" && b.modmask === SUPER_MODMASK && b.release)
+            ))
         if (foreign) return
+        haveConfirm = binds.some((b: any) => ours(b) && b.key === "SUPER_L" && b.release)
+        haveEscape = binds.some((b: any) => ours(b) && b.key === "escape")
     } catch (e) {
         console.error("WorkspaceSwitcher: failed to query binds, skipping setup:", e)
         return
@@ -44,6 +53,10 @@ async function registerSuperTabBinds() {
         "keyword unbind SUPER SHIFT, TAB",
         "keyword binde SUPER, TAB, exec, kiwictl workspaces open-next",
         "keyword binde SUPER SHIFT, TAB, exec, kiwictl workspaces previous",
+        // never unbind SUPER_L (would take tap-to-launch binds with it), so
+        // only add ours when it isn't registered yet
+        ...(haveConfirm ? [] : ["keyword bindrt SUPER, SUPER_L, exec, kiwictl workspaces confirm"]),
+        ...(haveEscape ? [] : ["keyword bindr SUPER, escape, exec, kiwictl workspaces close"]),
     ].join(" ; ")]).catch(e =>
         console.error("WorkspaceSwitcher: failed to register binds:", e))
 }
@@ -127,59 +140,6 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
             anchor={Astal.WindowAnchor.CENTER | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT}
             application={app}
             layer={Astal.Layer.TOP}
-            keymode={isVisible.as(v => v ? Astal.Keymode.EXCLUSIVE : Astal.Keymode.NONE)}
-            $={(self) => {
-                // Confirm on Super release, as observed by the keyboard
-                // grab. GDK's cached modifier state is stale until our
-                // surface has held keyboard focus at least once, so only
-                // trust state that arrives through events: the focus-enter
-                // snapshot (fresh from the wayland enter) and modifier
-                // changes seen while focused. sawSuper gates the release so
-                // a stale all-clear can never confirm mid-hold.
-                let sawSuper = false
-
-                const keys = new Gtk.EventControllerKey()
-                keys.connect("key-pressed", (_ctrl, keyval) => {
-                    if (keyval === Gdk.KEY_Escape) {
-                        setVisibility(false)
-                        return true
-                    }
-                    return false
-                })
-                keys.connect("modifiers", (_ctrl, state: number) => {
-                    if (!isVisible()) return
-                    if (state & Gdk.ModifierType.SUPER_MASK) {
-                        sawSuper = true
-                    } else if (sawSuper) {
-                        confirmAndClose()
-                    }
-                })
-                self.add_controller(keys)
-
-                const focus = new Gtk.EventControllerFocus()
-                focus.connect("enter", () => {
-                    if (!isVisible()) return
-                    const kb = self.get_display().get_default_seat()?.get_keyboard()
-                    if (!kb) return
-                    if (kb.modifier_state & Gdk.ModifierType.SUPER_MASK) {
-                        sawSuper = true
-                    } else {
-                        // Super was gone before the grab landed (fast tap)
-                        confirmAndClose()
-                    }
-                })
-                self.add_controller(focus)
-
-                isVisible.subscribe(() => {
-                    if (!isVisible()) return
-                    sawSuper = false
-                    // backstop: keyboard focus never arrived, so a release
-                    // can never be observed — treat it as a fast tap
-                    setTimeout(() => {
-                        if (isVisible() && !sawSuper) confirmAndClose()
-                    }, 600)
-                })
-            }}
         >
             <centerbox class="ws-switch-menu">
                 <box
