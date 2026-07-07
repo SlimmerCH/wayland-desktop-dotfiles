@@ -1,7 +1,13 @@
 .app-switch-container {
-    background-color: rgba(0, 0, 0, 0.6);
+    background-color: rgba(55, 55, 55, 0.75);
     padding: 24px;
     border-radius: 8px;
+}
+
+.preview-title-bar {
+    background-color: #000;
+    border-radius: 6px;
+    padding: 4px 8px;
 }
 
 .window-preview {

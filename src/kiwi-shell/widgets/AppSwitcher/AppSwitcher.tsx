@@ -265,6 +265,7 @@ export function WindowPreview({ client }: { client: any }) {
             class="window-preview"
         >
             <scrolledwindow
+                class="preview-title-bar"
                 hscrollbarPolicy={Gtk.PolicyType.EXTERNAL}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
             >
