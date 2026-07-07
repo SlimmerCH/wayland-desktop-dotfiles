@@ -166,7 +166,9 @@
 
           # Controller Script
           echo "#!${pkgs.bash}/bin/bash" > $out/bin/${pname}ctl
-          echo "exec ${ags.packages.${system}.default}/bin/ags request \"\$@\"" >> $out/bin/${pname}ctl
+          # "--" stops the ags CLI from eating flags like --help meant for
+          # the shell's own quarrel-based command parser
+          echo "exec ${ags.packages.${system}.default}/bin/ags request -- \"\$@\"" >> $out/bin/${pname}ctl
           chmod +x $out/bin/${pname}ctl
 
           runHook postInstall
