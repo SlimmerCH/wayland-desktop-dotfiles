@@ -32,8 +32,10 @@ async function registerSuperTabBinds() {
     let haveEscape = false
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
+        // any kiwictl bind counts as ours: the launcher registers its own
+        // SUPER_L release bind (tap-to-open) which must not read as foreign
         const ours = (b: any) =>
-            b.dispatcher === "exec" && b.arg.includes("kiwictl workspaces")
+            b.dispatcher === "exec" && b.arg.includes("kiwictl")
         const foreign = binds.some((b: any) =>
             b.submap === "" && !ours(b) && (
                 (b.key === "TAB" && (b.modmask === SUPER_MODMASK || b.modmask === (SUPER_MODMASK | 1))) ||
@@ -42,8 +44,12 @@ async function registerSuperTabBinds() {
                 (b.key === "SUPER_L" && b.modmask === SUPER_MODMASK && b.release)
             ))
         if (foreign) return
-        haveConfirm = binds.some((b: any) => ours(b) && b.key === "SUPER_L" && b.release)
-        haveEscape = binds.some((b: any) => ours(b) && b.key === "escape")
+        haveConfirm = binds.some((b: any) =>
+            b.key === "SUPER_L" && b.release &&
+            b.dispatcher === "exec" && b.arg.includes("kiwictl workspaces"))
+        haveEscape = binds.some((b: any) =>
+            b.key === "escape" &&
+            b.dispatcher === "exec" && b.arg.includes("kiwictl workspaces"))
     } catch (e) {
         console.error("WorkspaceSwitcher: failed to query binds, skipping setup:", e)
         return

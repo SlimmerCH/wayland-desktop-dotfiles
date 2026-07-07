@@ -139,20 +139,22 @@ Super to switch, Escape to abort. Registered automatically unless `SUPER+TAB`
 is already bound; custom keys can call `kiwictl workspaces
 open-next|previous|confirm|close` the same way as the app switcher.
 
-### App Launcher (Super+Space)
+### App Launcher (Super)
 
-Super+Space opens a Spotlight-style launcher: type to fuzzy-search your
+Tapping Super opens a Spotlight-style launcher: type to fuzzy-search your
 applications, Up/Down or Tab to select, Enter to launch, Escape (or a click
-outside the panel) to dismiss. The keybind is registered automatically unless
-your config already binds `SUPER+space`; custom keys can call `kiwictl
-launcher open|close|toggle`.
+outside the panel) to dismiss. The tap bind only fires when nothing else
+used the Super hold — Super+Tab, Super+drag and friends stay untouched. It
+is registered automatically unless your config already binds plain
+`SUPER_L`; custom keys can call `kiwictl launcher open|close|toggle`.
 
 ### Desktop Icons
 
 The contents of `~/Desktop` (your XDG desktop folder) appear as icons on the
-wallpaper, always behind your windows. Double-click opens a file with its
-default application (`.desktop` launchers start their app, folders open in
-your file manager), right-click offers Open / Show in Files / Move to Trash.
+wallpaper, always behind your windows. Double-click (or Enter) opens a file
+with its default application (`.desktop` launchers start their app, folders
+open in your file manager), Delete moves the selection to trash, and
+right-click offers Open / Open With… / Show in Files / Move to Trash.
 The layer updates live as files come and go. Disable it with the
 `desktop_icons` setting.
 

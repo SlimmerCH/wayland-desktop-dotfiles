@@ -33,32 +33,51 @@ const results = createComputed(get => {
     return apps.fuzzy_query(text).slice(0, MAX_RESULTS)
 })
 
-// ─── Super+Space keybind ──────────────────────────────────────────────────────
-// Same scheme as the alt-tab/super-tab registration: bind dynamically so the
-// launcher works out of the box, but leave the keyboard alone if the user's
-// config already binds SUPER+space to something else. Dynamic keywords are
-// wiped on config reload, so this re-runs on config-reloaded.
+// ─── Super tap keybind ────────────────────────────────────────────────────────
+// The launcher opens on a plain Super tap, rofi-style: a release bind on
+// SUPER_L. Hyprland shadows non-transparent binds whenever another bind
+// (key, mouse or scroll) fires while the mod is held — shadowKeybinds() in
+// KeybindManager.cpp — so this only triggers on a clean tap. The workspace
+// switcher's confirm on the same key is a transparent bindrt: it cannot be
+// shadowed, keeps firing after Super+Tab, and is no-op guarded shell-side.
+// Dynamic keywords are wiped on config reload, so this re-runs on
+// config-reloaded. SUPER_L is never unbound wholesale — that would take the
+// workspace confirm bind with it.
 
 const SUPER_MODMASK = 64
 
 async function registerLauncherBind() {
+    let staleSpaceBind = false
+    let haveToggle = false
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
         const ours = (b: any) =>
-            b.dispatcher === "exec" && b.arg.includes("kiwictl launcher")
+            b.dispatcher === "exec" && b.arg.includes("kiwictl")
+        // any foreign bind on plain super (press or release — both collide
+        // with tap-to-launch semantics) means the user has their own setup
         const foreign = binds.some((b: any) =>
-            b.key.toLowerCase() === "space" &&
-            b.modmask === SUPER_MODMASK && b.submap === "" && !ours(b))
+            b.key === "SUPER_L" && b.modmask === SUPER_MODMASK &&
+            b.submap === "" && !ours(b))
         if (foreign) return
+        haveToggle = binds.some((b: any) =>
+            b.key === "SUPER_L" && b.release &&
+            b.dispatcher === "exec" && b.arg.includes("kiwictl launcher"))
+        // earlier kiwi versions bound super+space — clean that up
+        staleSpaceBind = binds.some((b: any) =>
+            b.key.toLowerCase() === "space" && b.modmask === SUPER_MODMASK &&
+            b.dispatcher === "exec" && b.arg.includes("kiwictl launcher"))
     } catch (e) {
         console.error("Launcher: failed to query binds, skipping setup:", e)
         return
     }
 
-    execAsync(["hyprctl", "--batch", [
-        "keyword unbind SUPER, space",
-        "keyword bind SUPER, space, exec, kiwictl launcher toggle",
-    ].join(" ; ")]).catch(e =>
+    const batch = [
+        ...(staleSpaceBind ? ["keyword unbind SUPER, space"] : []),
+        ...(haveToggle ? [] : ["keyword bindr SUPER, SUPER_L, exec, kiwictl launcher toggle"]),
+    ]
+    if (batch.length === 0) return
+
+    execAsync(["hyprctl", "--batch", batch.join(" ; ")]).catch(e =>
         console.error("Launcher: failed to register bind:", e))
 }
 
