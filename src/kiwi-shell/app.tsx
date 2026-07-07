@@ -10,6 +10,7 @@ import WorkspaceSwitcher, {
 } from "./widgets/WorkspaceSwitcher/WorkspaceSwitcher"
 import Dock from "./widgets/Dock/Dock"
 import Desktop from "./widgets/Desktop/Desktop"
+import Launcher, { toggleLauncher } from "./widgets/Launcher/Launcher"
 import { execAsync } from "ags/process"
 import Prompt from "./widgets/prompts"
 import { For, This, createBinding, createState } from "ags"
@@ -43,6 +44,9 @@ app.start({
     } else if (cmd == "workspaces") {
       toggleWorkspaceSwitcher(arg)
       response(``)
+    } else if (cmd == "launcher") {
+      toggleLauncher(arg ?? "toggle")
+      response(``)
     } else if (cmd == "quit") {
       app.quit()
     } else if (cmd == "debug") {
@@ -71,6 +75,7 @@ app.start({
             {index() === 0 && <IndicatorBar gdkmonitor={gdkmonitor} />}
             {index() === 0 && <AppSwitcher gdkmonitor={gdkmonitor} />}
             {index() === 0 && <WorkspaceSwitcher gdkmonitor={gdkmonitor} />}
+            {index() === 0 && <Launcher gdkmonitor={gdkmonitor} />}
             {index() === 0 && <Prompt gdkmonitor={gdkmonitor} />}
           </This>
         )}

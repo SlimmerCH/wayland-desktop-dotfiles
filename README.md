@@ -125,6 +125,14 @@ Super to switch, Escape to abort. Registered automatically unless `SUPER+TAB`
 is already bound; custom keys can call `kiwictl workspaces
 open-next|previous|confirm|close` the same way as the app switcher.
 
+### App Launcher (Super+Space)
+
+Super+Space opens a Spotlight-style launcher: type to fuzzy-search your
+applications, Up/Down or Tab to select, Enter to launch, Escape (or a click
+outside the panel) to dismiss. The keybind is registered automatically unless
+your config already binds `SUPER+space`; custom keys can call `kiwictl
+launcher open|close|toggle`.
+
 ### Desktop Icons
 
 The contents of `~/Desktop` (your XDG desktop folder) appear as icons on the

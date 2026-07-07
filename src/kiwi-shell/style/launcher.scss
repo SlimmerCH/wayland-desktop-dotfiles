@@ -1,0 +1,75 @@
+.Launcher {
+    background: rgba(0, 0, 0, 0.22);
+}
+
+.launcher-panel {
+    background: rgba(28, 28, 32, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 26px;
+    padding: 8px;
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
+}
+
+.launcher-search-row {
+    padding: 8px 14px;
+}
+
+.launcher-search-icon {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.launcher-entry {
+    background: none;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    font-size: 20px;
+    color: #fff;
+    caret-color: #fff;
+    min-height: 38px;
+    padding: 0;
+
+    placeholder {
+        color: rgba(255, 255, 255, 0.4);
+    }
+
+    selection {
+        background-color: rgba(255, 255, 255, 0.25);
+        color: #fff;
+    }
+}
+
+.launcher-results {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 4px;
+    padding-top: 8px;
+    padding-bottom: 4px;
+}
+
+.launcher-row {
+    border-radius: 16px;
+    padding: 8px 12px;
+    transition: background-color 100ms ease;
+
+    &:hover {
+        background-color: rgba(255, 255, 255, 0.06);
+    }
+
+    &.selected {
+        background-color: rgba(255, 255, 255, 0.14);
+    }
+}
+
+.launcher-row-icon {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+
+.launcher-row-name {
+    font-size: 14px;
+    color: #f0f0f0;
+}
+
+.launcher-row-desc {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+}
