@@ -125,6 +125,15 @@ Super to switch, Escape to abort. Registered automatically unless `SUPER+TAB`
 is already bound; custom keys can call `kiwictl workspaces
 open-next|previous|confirm|close` the same way as the app switcher.
 
+### Desktop Icons
+
+The contents of `~/Desktop` (your XDG desktop folder) appear as icons on the
+wallpaper, always behind your windows. Double-click opens a file with its
+default application (`.desktop` launchers start their app, folders open in
+your file manager), right-click offers Open / Show in Files / Move to Trash.
+The layer updates live as files come and go. Disable it with the
+`desktop_icons` setting.
+
 ---
 
 ## Icon Theme & Font

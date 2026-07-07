@@ -9,6 +9,7 @@ import WorkspaceSwitcher, {
   toggleWorkspaceSwitcher,
 } from "./widgets/WorkspaceSwitcher/WorkspaceSwitcher"
 import Dock from "./widgets/Dock/Dock"
+import Desktop from "./widgets/Desktop/Desktop"
 import { execAsync } from "ags/process"
 import Prompt from "./widgets/prompts"
 import { For, This, createBinding, createState } from "ags"
@@ -66,6 +67,7 @@ app.start({
             <Bar gdkmonitor={gdkmonitor} toggleNc={toggleNc} />
             <Dock gdkmonitor={gdkmonitor} />
             <NotificationCenter gdkmonitor={gdkmonitor} />
+            {index() === 0 && <Desktop gdkmonitor={gdkmonitor} />}
             {index() === 0 && <IndicatorBar gdkmonitor={gdkmonitor} />}
             {index() === 0 && <AppSwitcher gdkmonitor={gdkmonitor} />}
             {index() === 0 && <WorkspaceSwitcher gdkmonitor={gdkmonitor} />}
