@@ -129,6 +129,15 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
             layer={Astal.Layer.TOP}
             keymode={isVisible.as(v => v ? Astal.Keymode.EXCLUSIVE : Astal.Keymode.NONE)}
             $={(self) => {
+                // Confirm on Super release, as observed by the keyboard
+                // grab. GDK's cached modifier state is stale until our
+                // surface has held keyboard focus at least once, so only
+                // trust state that arrives through events: the focus-enter
+                // snapshot (fresh from the wayland enter) and modifier
+                // changes seen while focused. sawSuper gates the release so
+                // a stale all-clear can never confirm mid-hold.
+                let sawSuper = false
+
                 const keys = new Gtk.EventControllerKey()
                 keys.connect("key-pressed", (_ctrl, keyval) => {
                     if (keyval === Gdk.KEY_Escape) {
@@ -138,23 +147,37 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
                     return false
                 })
                 keys.connect("modifiers", (_ctrl, state: number) => {
-                    // releasing Super confirms
-                    if (isVisible() && !(state & Gdk.ModifierType.SUPER_MASK))
+                    if (!isVisible()) return
+                    if (state & Gdk.ModifierType.SUPER_MASK) {
+                        sawSuper = true
+                    } else if (sawSuper) {
                         confirmAndClose()
+                    }
                 })
                 self.add_controller(keys)
 
-                // fast-tap race: if Super was already released before the
-                // grab landed, no modifiers event will ever arrive — check
-                // the seat state shortly after mapping
+                const focus = new Gtk.EventControllerFocus()
+                focus.connect("enter", () => {
+                    if (!isVisible()) return
+                    const kb = self.get_display().get_default_seat()?.get_keyboard()
+                    if (!kb) return
+                    if (kb.modifier_state & Gdk.ModifierType.SUPER_MASK) {
+                        sawSuper = true
+                    } else {
+                        // Super was gone before the grab landed (fast tap)
+                        confirmAndClose()
+                    }
+                })
+                self.add_controller(focus)
+
                 isVisible.subscribe(() => {
                     if (!isVisible()) return
+                    sawSuper = false
+                    // backstop: keyboard focus never arrived, so a release
+                    // can never be observed — treat it as a fast tap
                     setTimeout(() => {
-                        if (!isVisible()) return
-                        const kb = self.get_display().get_default_seat()?.get_keyboard()
-                        if (kb && !(kb.modifier_state & Gdk.ModifierType.SUPER_MASK))
-                            confirmAndClose()
-                    }, 90)
+                        if (isVisible() && !sawSuper) confirmAndClose()
+                    }, 600)
                 })
             }}
         >
