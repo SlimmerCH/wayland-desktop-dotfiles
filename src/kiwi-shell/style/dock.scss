@@ -109,6 +109,65 @@
     }
 }
 
+.dock-previews {
+    margin-bottom: 4.5px;
+    contents {
+        background-color: rgba(0, 0, 0, 0.93);
+        border: none;
+        border-top: #1a1a1a 2px solid;
+        box-shadow: unset;
+        padding: 6px;
+        border-radius: 12px;
+    }
+}
+
+.dock-preview-item {
+    padding: 6px;
+    border-radius: 9px;
+    transition: background-color 150ms ease;
+
+    &:hover {
+        background-color: rgba(255, 255, 255, 0.09);
+    }
+
+    &.minimized .dock-preview-shot {
+        opacity: 0.45;
+    }
+}
+
+.dock-preview-title {
+    font-size: 10px;
+    color: #d6d6d6;
+}
+
+.dock-preview-shot {
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+.dock-preview-close {
+    background: none;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    border-radius: 100%;
+    min-width: 16px;
+    min-height: 16px;
+    padding: 0;
+    color: #b0b0b0;
+    opacity: 0;
+    transition: opacity 150ms ease;
+
+    &:hover {
+        color: #fff;
+        background-color: rgba(255, 255, 255, 0.15);
+    }
+}
+
+.dock-preview-item:hover .dock-preview-close {
+    opacity: 1;
+}
+
 .menu-spacer {
     border-bottom: 1px rgba(255, 255, 255, 0.2) solid;
     margin: 6px;

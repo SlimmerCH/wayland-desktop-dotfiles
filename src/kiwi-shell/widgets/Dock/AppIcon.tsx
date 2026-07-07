@@ -1,9 +1,11 @@
-import { Gtk } from "ags/gtk4"
-import { createState, createComputed, createBinding, For } from "ags"
+import { Gtk, Gdk } from "ags/gtk4"
+import { createState, createComputed, createBinding, createEffect, For } from "ags"
+import Pango from "gi://Pango"
 import { hyprland, list, setList, saveList, isNixManaged, entryToClass, JUMP_ANIMATION_CLASS_TIMEOUT, MINIMIZED_WS, isMinimized, isClientVisible, minimizeClient, restoreClient } from "./dock-state"
 import Hyprland from "gi://AstalHyprland"
 import { DockContextIcon } from "./dock-utils"
 import { iconForEntry, AppIconImage } from "../appIcon"
+import { captureWindowToTexture } from "../AppSwitcher/clientCachingService"
 import { conf } from "../config"
 
 export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v: boolean) => void }) {
@@ -47,6 +49,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     }
 
     const menu = AppContextMenu(entry, clientsBinding, application, icon, name, pinned, onPinChange, setMenuOpen)
+    const previews = WindowPreviews(clientsBinding, setMenuOpen)
 
     return (
         <box class="app-icon-container">
@@ -59,20 +62,23 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                         application.launch([], null)
                         return
                     }
-                    const visible = clients.filter(isClientVisible)
-                    if (visible.length > 0) {
+                    // several windows → window picker with previews,
+                    // taskbar style
+                    if (clients.length > 1) {
+                        previews.popup()
+                        return
+                    }
+                    const client = clients[0]
+                    if (isClientVisible(client)) {
                         // visible → stash in the minimized scratchpad
-                        for (const c of visible) minimizeClient(c)
-                        return
+                        minimizeClient(client)
+                    } else if (isMinimized(client)) {
+                        // bring it back to the current workspace
+                        restoreClient(client)
+                    } else {
+                        // running on another (non-visible) workspace → jump to it
+                        client.focus()
                     }
-                    const minimized = clients.filter(isMinimized)
-                    if (minimized.length > 0) {
-                        // bring every minimized window back to the current workspace
-                        for (const c of minimized) restoreClient(c)
-                        return
-                    }
-                    // running on another (non-visible) workspace → jump to it
-                    clients[0].focus()
                 }}
                 $={(self) => {
                     const gesture = new Gtk.GestureClick()
@@ -86,6 +92,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
             >
                 <box orientation={Gtk.Orientation.VERTICAL}>
                     {menu}
+                    {previews}
                     <overlay>
                         <AppIconImage entry={entry} pixelSize={
                             conf.as(conf => conf.dock_icon_size)
@@ -101,6 +108,118 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                     </overlay>
                 </box>
             </button>
+        </box>
+    )
+}
+
+// Windows-taskbar-style window picker: one live thumbnail per window of the
+// app, click to focus (or restore, if minimized), ✕ to close.
+function WindowPreviews(
+    clientsBinding: ReturnType<typeof createComputed<Hyprland.Client[]>>,
+    setMenuOpen: (v: boolean) => void,
+) {
+    let popover: Gtk.Popover
+    const [open, setOpen] = createState(false)
+
+    return (
+        <popover
+            autohide={true}
+            hasArrow={false}
+            class="dock-previews"
+            $={(self) => {
+                popover = self
+                self.connect("notify::visible", () => {
+                    setOpen(self.visible)
+                    setMenuOpen(self.visible)
+                })
+                // closing the last window from the picker leaves nothing
+                // to show — dismiss instead of floating an empty pill
+                createEffect(() => {
+                    if (clientsBinding().length === 0 && popover.visible)
+                        popover.popdown()
+                })
+            }}
+        >
+            <box spacing={4}>
+                <For each={clientsBinding}>
+                    {(client) => (
+                        <WindowPreviewItem
+                            client={client}
+                            pickerOpen={open}
+                            popdown={() => popover.popdown()}
+                        />
+                    )}
+                </For>
+            </box>
+        </popover>
+    ) as Gtk.Popover
+}
+
+function WindowPreviewItem({ client, pickerOpen, popdown }: {
+    client: Hyprland.Client,
+    pickerOpen: ReturnType<typeof createState<boolean>>[0],
+    popdown: () => void,
+}) {
+    const address = client.get_address()
+    const [texture, setTexture] = createState<Gdk.Texture | null>(null)
+    const title = createBinding(client, "title")
+    const workspace = createBinding(client, "workspace")
+
+    createEffect(() => {
+        if (!pickerOpen()) return
+        captureWindowToTexture(address).then(t => {
+            if (t) setTexture(t)
+        })
+    })
+
+    return (
+        <box
+            orientation={Gtk.Orientation.VERTICAL}
+            spacing={4}
+            class={workspace.as(ws =>
+                ws?.name === MINIMIZED_WS ? "dock-preview-item minimized" : "dock-preview-item"
+            )}
+            $={(self) => {
+                // a plain gesture instead of a button: the close button is
+                // nested inside, and its clicks must not activate the window
+                const click = new Gtk.GestureClick()
+                click.set_button(1)
+                click.connect("released", (_gesture, _nPress, x, y) => {
+                    const target = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+                    for (let w: Gtk.Widget | null = target; w && w !== self; w = w.get_parent()) {
+                        if (w instanceof Gtk.Button) return
+                    }
+                    popdown()
+                    if (isMinimized(client)) restoreClient(client)
+                    else client.focus()
+                })
+                self.add_controller(click)
+            }}
+        >
+            <box class="dock-preview-header" spacing={6}>
+                <label
+                    class="dock-preview-title"
+                    label={title}
+                    ellipsize={Pango.EllipsizeMode.END}
+                    maxWidthChars={1}
+                    hexpand
+                    xalign={0}
+                />
+                <button
+                    class="dock-preview-close"
+                    onclicked={() => client.kill()}
+                >
+                    <Gtk.Image iconName="window-close-symbolic" pixelSize={10} />
+                </button>
+            </box>
+            <Gtk.Picture
+                class="dock-preview-shot"
+                canShrink={true}
+                contentFit={Gtk.ContentFit.CONTAIN}
+                widthRequest={192}
+                heightRequest={112}
+                paintable={texture}
+            />
         </box>
     )
 }
