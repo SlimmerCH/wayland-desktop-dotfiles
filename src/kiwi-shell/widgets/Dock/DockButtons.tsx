@@ -26,6 +26,8 @@ export function HomeFolderButton({ setMenuOpen }: { setMenuOpen: (v: boolean) =>
         <popover
             autohide={true}
             hasArrow={false}
+            hexpand={false}
+            vexpand={false}
             class="app-context-menu"
             $={(self) => {
                 popover = self
@@ -104,6 +106,8 @@ export function TrashButton({ setMenuOpen }: { setMenuOpen: (v: boolean) => void
         <popover
             autohide={true}
             hasArrow={false}
+            hexpand={false}
+            vexpand={false}
             class="app-context-menu"
             $={(self) => {
                 popover = self

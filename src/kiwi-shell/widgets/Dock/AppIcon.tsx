@@ -165,6 +165,12 @@ function WindowPreviews(
             // must not swallow clicks meant for the dock or the icon
             autohide={false}
             hasArrow={false}
+            // expand flags propagate up from *visible* children — including
+            // popovers, which box layout otherwise ignores. Without this,
+            // the hexpand title labels inside make the icon's dock cell grow
+            // while the flyout is open, shifting the whole dock sideways.
+            hexpand={false}
+            vexpand={false}
             class="dock-previews"
             $={(self) => {
                 popover = self
@@ -294,6 +300,8 @@ function AppContextMenu(entry, clientsBinding, application, icon, name, pinned, 
         <popover
             autohide={true}
             hasArrow={false}
+            hexpand={false}
+            vexpand={false}
             class="app-context-menu"
             $={(self) => {
                 popover = self
