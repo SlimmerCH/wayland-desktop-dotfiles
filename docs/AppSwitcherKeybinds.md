@@ -1,7 +1,20 @@
-# How to Create Proper Alt+Tab Keybinds for the App Switcher
-To create natural keybinds like in Windows, MacOS and Ubuntu, we use Hyprland's [submap](https://wiki.hypr.land/Configuring/Binds/#submaps) feature.
+# App Switcher Keybinds
 
-In your hyprland config, add the following:
+**You normally don't need to do anything.** On startup (and after every config
+reload) kiwi-shell registers natural Alt+Tab keybinds automatically, using
+Hyprland's [submap](https://wiki.hypr.land/Configuring/Binds/#submaps) feature —
+press `Alt`+`Tab` and hold `Alt`, press `Tab` again to cycle through the
+applications, release `Alt` to switch, or press `Escape` to abort.
+
+If **any** `ALT+TAB` bind already exists in your Hyprland config, kiwi-shell
+leaves your keyboard alone and registers nothing — so existing manual setups
+and custom alt-tab workflows keep working unchanged.
+
+## Manual setup (custom keys)
+
+If you want different keys, bind the `kiwictl apps` commands yourself. This is
+the equivalent of what kiwi-shell sets up automatically:
+
 ```bash
 submap = app_switcher
 
@@ -29,4 +42,3 @@ Add the keybind to enter open the app switcher and enter the submap:
 bind = ALT, TAB, exec, kiwictl apps open-next
 bind = ALT, TAB, submap, app_switcher
 ```
-To open the menu, press `Alt`+`Tab` and hold on to `Alt`. Press `Tab` again while holding `Alt` to cycle trough the applications.

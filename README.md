@@ -104,7 +104,9 @@ source = ~/.config/kiwi-shell/hypr.conf
 
 ### App Switcher (Alt+Tab)
 
-The app switcher is controlled via `kiwictl`. Bind these commands in your Hyprland config:
+Alt+Tab works out of the box — kiwi-shell registers the keybinds automatically
+(and steps aside if your config already binds `ALT+TAB`). The switcher is
+controlled via `kiwictl`, so you can bind custom keys yourself:
 
 | Command | Description |
 |---|---|
@@ -112,7 +114,7 @@ The app switcher is controlled via `kiwictl`. Bind these commands in your Hyprla
 | `kiwictl apps confirm` | Switch to the selected app |
 | `kiwictl apps close` | Dismiss the switcher |
 
-Setting up the keybinds can be a little tricky — see the [App Switcher Guide](./docs/AppSwitcherKeybinds.md) for a step-by-step walkthrough.
+See the [App Switcher Guide](./docs/AppSwitcherKeybinds.md) for the manual setup.
 
 ---
 

@@ -1,6 +1,7 @@
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createEffect, For, createBinding } from "ags"
+import { execAsync } from "ags/process"
 import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
 import { playSound } from "../sound"
@@ -25,6 +26,48 @@ hyprland.connect("notify::focused-client", () => {
         if (mruAddresses.length > 50) mruAddresses.length = 50
     }
 })
+
+// ─── Alt+Tab keybinds ─────────────────────────────────────────────────────────
+// Registers the whole alt-tab submap dynamically so users get working binds
+// out of the box (docs/AppSwitcherKeybinds.md stays the manual route). If any
+// ALT+TAB bind already exists in the root submap — a manual setup or the
+// user's own alt-tab — we leave the keyboard alone. Dynamic keywords are
+// wiped on config reload, so this re-runs on config-reloaded, at which point
+// only config-file binds are visible to the check again.
+
+const ALT_MODMASK = 8
+
+async function registerAltTabBinds() {
+    try {
+        const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
+        const taken = binds.some((b: any) =>
+            b.key === "TAB" && b.modmask === ALT_MODMASK && b.submap === "")
+        if (taken) return
+    } catch (e) {
+        console.error("AppSwitcher: failed to query binds, skipping alt-tab setup:", e)
+        return
+    }
+
+    // one --batch call: the submap keyword is stateful (it brackets which
+    // submap the following binds land in), so order must be guaranteed
+    execAsync(["hyprctl", "--batch", [
+        "keyword bind ALT, TAB, exec, kiwictl apps open-next",
+        "keyword bind ALT, TAB, submap, app_switcher",
+        "keyword submap app_switcher",
+        "keyword binde ALT, TAB, exec, kiwictl apps open-next",
+        "keyword bindrt ALT, ALT_L, exec, kiwictl apps confirm",
+        "keyword bindrt ALT, ALT_L, submap, reset",
+        "keyword bindr , escape, exec, kiwictl apps close",
+        "keyword bindr , escape, submap, reset",
+        "keyword bindr ALT, escape, exec, kiwictl apps close",
+        "keyword bindr ALT, escape, submap, reset",
+        "keyword submap reset",
+    ].join(" ; ")]).catch(e =>
+        console.error("AppSwitcher: failed to register alt-tab binds:", e))
+}
+
+registerAltTabBinds()
+hyprland.connect("config-reloaded", registerAltTabBinds)
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 export function toggleAppSwitcher(cmd: string) {
