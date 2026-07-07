@@ -15,7 +15,7 @@ import { conf } from "../../config"
 import { Icon } from "../../iconNames"
 import { playSound } from "../../sound"
 import { closeNc } from "../../Notifications/NotificationCenter"
-import { debug } from "../../../app"
+import { debug } from "../../../debug"
 
 import AstalBluetooth from "gi://AstalBluetooth?version=0.1"
 import BluetoothTab from "./tabs/BluetoothTab"

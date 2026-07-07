@@ -42,6 +42,26 @@
         "type": "github"
       }
     },
+    "astal-latest": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783119102,
+        "narHash": "sha256-bXd034/ARs18ZQ7hWUAw9NwyfBmcKQws8DQHzwYp6jM=",
+        "owner": "aylur",
+        "repo": "astal",
+        "rev": "04454c22094401cc8e682cfe1f8ecc3194cac5f9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "aylur",
+        "repo": "astal",
+        "type": "github"
+      }
+    },
     "kiwi-settings": {
       "inputs": {
         "nixpkgs": [
@@ -81,6 +101,7 @@
     "root": {
       "inputs": {
         "ags": "ags",
+        "astal-latest": "astal-latest",
         "kiwi-settings": "kiwi-settings",
         "nixpkgs": "nixpkgs"
       }

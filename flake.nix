@@ -9,6 +9,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # quarrel (the astal CLI parser) is newer than the astal stack pinned
+    # through ags — pulled from its own input so the rest stays put
+    astal-latest = {
+      url = "github:aylur/astal";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     kiwi-settings = {
       url = "github:selimbucher/kiwi-settings";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -20,6 +27,7 @@
       self,
       nixpkgs,
       ags,
+      astal-latest,
       kiwi-settings,
     }:
     let
@@ -95,6 +103,7 @@
       extraPackages = astalPackages ++ [
         pkgs.libadwaita
         pkgs.libsoup_3
+        astal-latest.packages.${system}.quarrel
         app-capture
         hyprland-shortcuts
       ];

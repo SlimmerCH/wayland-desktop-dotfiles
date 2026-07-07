@@ -2,60 +2,24 @@ import app from "ags/gtk4/app"
 import style from "./style.scss"
 import Bar from "./widgets/Bar/Bar"
 import IndicatorBar from "./widgets/IndicatorBar/IndicatorBar"
-import AppSwitcher, {
-  toggleAppSwitcher,
-} from "./widgets/AppSwitcher/AppSwitcher"
-import WorkspaceSwitcher, {
-  toggleWorkspaceSwitcher,
-} from "./widgets/WorkspaceSwitcher/WorkspaceSwitcher"
+import AppSwitcher from "./widgets/AppSwitcher/AppSwitcher"
+import WorkspaceSwitcher from "./widgets/WorkspaceSwitcher/WorkspaceSwitcher"
 import Dock from "./widgets/Dock/Dock"
 import Desktop from "./widgets/Desktop/Desktop"
-import Launcher, { toggleLauncher } from "./widgets/Launcher/Launcher"
-import { execAsync } from "ags/process"
+import Launcher from "./widgets/Launcher/Launcher"
 import Prompt from "./widgets/prompts"
-import { For, This, createBinding, createState } from "ags"
+import { For, This, createBinding } from "ags"
 import NotificationCenter, {
   toggleNc,
 } from "./widgets/Notifications/NotificationCenter"
+import { handleCliRequest } from "./cli"
 
 import steamDesktopPatcher from "./widgets/services/steamDesktopPatcher";
 import nightShiftService from "./widgets/services/nightShiftSchedule"
 
-let sawWarning = false
-
-const [debug, setDebug] = createState(false)
-export { debug }
-
 app.start({
   requestHandler(argv: string[], response: (response: string) => void) {
-    const [cmd, arg, ...rest] = argv
-    if (cmd == "show") {
-      const string = `WARNING: kiwictl show command is deprecated. This is now handled automatically.`
-      if (!sawWarning) {
-        try {
-          execAsync(["notify-send", "Kiwi Shell", string])
-        } catch (error) {}
-        sawWarning = true
-      }
-      response(string)
-    } else if (cmd == "apps") {
-      toggleAppSwitcher(arg)
-      response(``)
-    } else if (cmd == "workspaces") {
-      toggleWorkspaceSwitcher(arg)
-      response(``)
-    } else if (cmd == "launcher") {
-      toggleLauncher(arg ?? "toggle")
-      response(``)
-    } else if (cmd == "quit") {
-      app.quit()
-    } else if (cmd == "debug") {
-      setDebug(true)
-    } else if (cmd == undefined) {
-      response(`Kiwi-Shell already running.`)
-    } else {
-      response(`Unknown command: ${cmd}`)
-    }
+    handleCliRequest(argv, response)
   },
   css: style,
   main() {

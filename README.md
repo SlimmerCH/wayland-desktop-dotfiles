@@ -88,6 +88,20 @@ To launch it automatically on login, add this to your Hyprland config:
 exec-once = kiwi
 ```
 
+### kiwictl
+
+A running shell is controlled through `kiwictl`:
+
+```bash
+kiwictl --help        # full command reference
+kiwictl launcher      # toggle the app launcher
+kiwictl apps open-next
+```
+
+Available commands: `apps`, `workspaces`, `launcher`, `quit`, `debug`. Every
+subcommand takes `--help`. `kiwictl debug` turns on verbose logging in
+`~/.cache/kiwi-shell.log` for the running instance.
+
 ### Theme Color
 
 When you change the accent color in the app, a config file is written to `~/.config/kiwi-shell/hypr.conf`:
