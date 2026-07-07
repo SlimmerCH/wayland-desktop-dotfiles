@@ -202,7 +202,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 `
             )}
             name="ags-dock"
-            class={conf.as(conf => `Dock theme-${conf.theme}`)}
+            class={conf.as(conf => `Dock theme-${conf.theme}${conf.dock_full_width ? " dock-full" : ""}`)}
             gdkmonitor={gdkmonitor}
             visible={true}
             exclusivity={conf.as(conf =>
@@ -402,7 +402,7 @@ function DockBar({ setMenuOpen, showDock, onDockBoxReady }: {
             <box
                 $type="center"
                 class={createComputed(get => `dock-bar${get(showDock) ? "" : " slide-out"}`)}
-                halign={Gtk.Align.CENTER}
+                halign={conf.as(c => c.dock_full_width ? Gtk.Align.FILL : Gtk.Align.CENTER)}
                 $={(self: Gtk.Widget) => {
                     dockBarRoots.add(self)
                     onCleanup(() => dockBarRoots.delete(self))
@@ -416,8 +416,12 @@ function DockBar({ setMenuOpen, showDock, onDockBoxReady }: {
                     $type="center"
                     class="dock-box"
                     orientation={Gtk.Orientation.HORIZONTAL}
+                    hexpand={true}
                     $={(self: Gtk.Widget) => onDockBoxReady(self)}
                 >
+                    {/* absorbs the extra space evenly in full-width mode,
+                        keeping the icons centered like the windows taskbar */}
+                    <box hexpand={true} />
                     <box>
                         <KeyedList
                             each={pinnedBinding}
@@ -498,6 +502,7 @@ function DockBar({ setMenuOpen, showDock, onDockBoxReady }: {
                             self.add_controller(motion)
                         }}
                     />
+                    <box hexpand={true} />
                 </box>
             </box>
         </centerbox>

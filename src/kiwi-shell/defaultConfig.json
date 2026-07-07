@@ -8,6 +8,7 @@
   "dock_trash": true,
   "auto_color": false,
   "dock_icon_size": 52,
+  "dock_full_width": false,
   "dock_arpeggio": false,
   "indicator_bar_position": "bottom",
   "auto_nightshift": false,

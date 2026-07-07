@@ -29,6 +29,19 @@
       rgba(0, 0, 0, 0.5) 0px 8px 12px 0px;
 }
 
+// windows-taskbar mode: the dock box runs flush across the whole screen
+.Dock.dock-full {
+    .dock-bar {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    .dock-box {
+        border-radius: 0;
+        margin-bottom: 0;
+    }
+}
+
 .dock-app-icon {
     padding: 0;
     filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.3));
