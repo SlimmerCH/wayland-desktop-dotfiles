@@ -150,6 +150,119 @@ function trashItem(item: DesktopItem) {
     }
 }
 
+function getClipboard(): Gdk.Clipboard {
+    return Gdk.Display.get_default()!.get_clipboard()
+}
+
+function copyItem(item: DesktopItem, cut = false) {
+    const uri = GLib.filename_to_uri(item.path, null)
+    const enc = new TextEncoder()
+    // x-gnome-copied-files carries the copy/cut verb for file managers,
+    // text/uri-list is the fallback everything else understands
+    getClipboard().set_content(Gdk.ContentProvider.new_union([
+        Gdk.ContentProvider.new_for_bytes("application/x-gnome-copied-files",
+            GLib.Bytes.new(enc.encode(`${cut ? "cut" : "copy"}\n${uri}`))),
+        Gdk.ContentProvider.new_for_bytes("text/uri-list",
+            GLib.Bytes.new(enc.encode(`${uri}\r\n`))),
+    ]))
+    logDebug(`[Desktop] ${cut ? "cut" : "copied"} ${item.path}`)
+}
+
+function clipboardHasFiles(): boolean {
+    const formats = getClipboard().get_formats()
+    return formats.contain_mime_type("application/x-gnome-copied-files")
+        || formats.contain_mime_type("text/uri-list")
+}
+
+// first free variant of `name` in the desktop dir: name, name (2), name (3)…
+function uniqueDest(name: string): Gio.File {
+    const dir = Gio.File.new_for_path(DESKTOP_DIR)
+    let dest = dir.get_child(name)
+    if (!dest.query_exists(null)) return dest
+    const dot = name.startsWith(".") ? -1 : name.lastIndexOf(".")
+    const stem = dot > 0 ? name.slice(0, dot) : name
+    const ext = dot > 0 ? name.slice(dot) : ""
+    for (let n = 2; ; n++) {
+        dest = dir.get_child(`${stem} (${n})${ext}`)
+        if (!dest.query_exists(null)) return dest
+    }
+}
+
+function pasteUris(uris: string[], cut: boolean) {
+    for (const uri of uris) {
+        const src = Gio.File.new_for_uri(uri)
+        const srcPath = src.get_path()
+        const name = src.get_basename()
+        if (!srcPath || !name) continue
+        // cutting a desktop file onto the desktop would just rename it
+        if (cut && src.get_parent()?.get_path() === DESKTOP_DIR) continue
+        const dest = uniqueDest(name)
+        // argv spawn (no shell quoting pitfalls); cp/mv recurse into
+        // folders and keep the shell responsive on big files
+        const argv = cut
+            ? ["mv", "--", srcPath, dest.get_path()!]
+            : ["cp", "-r", "--", srcPath, dest.get_path()!]
+        try {
+            Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE)
+        } catch (e) {
+            console.error(`Desktop: failed to paste ${srcPath}:`, e)
+        }
+    }
+}
+
+function pasteFromClipboard() {
+    const cb = getClipboard()
+    cb.read_async(
+        ["application/x-gnome-copied-files", "text/uri-list"],
+        GLib.PRIORITY_DEFAULT, null,
+        (_src, res) => {
+            let stream: Gio.InputStream
+            let mime: string | null
+            try {
+                ;[stream, mime] = cb.read_finish(res)
+            } catch (e) {
+                logDebug("[Desktop] paste: clipboard holds no files")
+                return
+            }
+            const out = Gio.MemoryOutputStream.new_resizable()
+            out.splice_async(stream,
+                Gio.OutputStreamSpliceFlags.CLOSE_SOURCE
+                | Gio.OutputStreamSpliceFlags.CLOSE_TARGET,
+                GLib.PRIORITY_DEFAULT, null,
+                (_out, spliceRes) => {
+                    try {
+                        out.splice_finish(spliceRes)
+                    } catch (e) {
+                        console.error("Desktop: paste read failed:", e)
+                        return
+                    }
+                    const text = new TextDecoder()
+                        .decode(out.steal_as_bytes().toArray())
+                    const lines = text.split(/\r?\n/)
+                        .filter(l => l && !l.startsWith("#"))
+                    let cut = false
+                    if (mime === "application/x-gnome-copied-files")
+                        cut = lines.shift() === "cut"
+                    logDebug(`[Desktop] paste ${lines.length} uri(s)`
+                        + ` (${cut ? "cut" : "copy"})`)
+                    pasteUris(lines, cut)
+                })
+        })
+}
+
+function selectedItem(): DesktopItem | undefined {
+    const child = flowBoxRef?.get_selected_children()[0]
+    const inner = child?.get_child()
+    return inner ? itemByBox.get(inner) : undefined
+}
+
+// is the picked widget at (x, y) inside a desktop icon?
+function overIcon(root: Gtk.Widget, x: number, y: number): boolean {
+    for (let w = root.pick(x, y, Gtk.PickFlags.DEFAULT); w && w !== root; w = w.get_parent())
+        if (w instanceof Gtk.FlowBoxChild) return true
+    return false
+}
+
 function openWithDialog(item: DesktopItem) {
     const file = Gio.File.new_for_path(item.path)
     const dialog = new Gtk.AppChooserDialog({ gfile: file })
@@ -213,6 +326,18 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
                             <label halign={Gtk.Align.START} label="Open With…" />
                         </box>
                     </button>
+                    <button onclicked={() => { menu.popdown(); copyItem(item) }}>
+                        <box spacing={6}>
+                            <Gtk.Image iconName="edit-copy-symbolic" pixelSize={16} />
+                            <label halign={Gtk.Align.START} label="Copy" />
+                        </box>
+                    </button>
+                    <button onclicked={() => { menu.popdown(); copyItem(item, true) }}>
+                        <box spacing={6}>
+                            <Gtk.Image iconName="edit-cut-symbolic" pixelSize={16} />
+                            <label halign={Gtk.Align.START} label="Cut" />
+                        </box>
+                    </button>
                     <button onclicked={() => { menu.popdown(); openPath(DESKTOP_DIR) }}>
                         <box spacing={6}>
                             <Gtk.Image iconName="folder-symbolic" pixelSize={16} />
@@ -247,6 +372,37 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
 }
 
 export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
+    let pasteBtn: Gtk.Button
+
+    // context menu for empty desktop space; parented onto the overlay below
+    const pasteMenu = (
+        <popover
+            autohide={true}
+            hasArrow={false}
+            hexpand={false}
+            vexpand={false}
+            class="desktop-menu"
+        >
+            <box orientation={Gtk.Orientation.VERTICAL} spacing={3}>
+                <button
+                    $={(self) => { pasteBtn = self }}
+                    onclicked={() => { pasteMenu.popdown(); pasteFromClipboard() }}
+                >
+                    <box spacing={6}>
+                        <Gtk.Image iconName="edit-paste-symbolic" pixelSize={16} />
+                        <label halign={Gtk.Align.START} label="Paste" />
+                    </box>
+                </button>
+                <button onclicked={() => { pasteMenu.popdown(); openPath(DESKTOP_DIR) }}>
+                    <box spacing={6}>
+                        <Gtk.Image iconName="folder-symbolic" pixelSize={16} />
+                        <label halign={Gtk.Align.START} label="Open in Files" />
+                    </box>
+                </button>
+            </box>
+        </popover>
+    ) as Gtk.Popover
+
     return (
         <window
             name="ags-desktop"
@@ -271,9 +427,70 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 self.visible = visible()
                 const dispose = visible.subscribe(() => { self.visible = visible() })
                 onCleanup(dispose)
+
+                // a window taking focus (click into an app) clears the
+                // desktop selection, like every OS desktop
+                self.connect("notify::is-active", () => {
+                    if (!self.isActive) flowBoxRef?.unselect_all()
+                })
+
+                const keys = new Gtk.EventControllerKey()
+                keys.connect("key-pressed", (_controller, keyval, _code, state) => {
+                    const ctrl = !!(state & Gdk.ModifierType.CONTROL_MASK)
+                    if (ctrl && (keyval === Gdk.KEY_v || keyval === Gdk.KEY_V)) {
+                        pasteFromClipboard()
+                        return Gdk.EVENT_STOP
+                    }
+                    if (ctrl && (keyval === Gdk.KEY_c || keyval === Gdk.KEY_C)) {
+                        const item = selectedItem()
+                        if (item) { copyItem(item); return Gdk.EVENT_STOP }
+                        return Gdk.EVENT_PROPAGATE
+                    }
+                    if (ctrl && (keyval === Gdk.KEY_x || keyval === Gdk.KEY_X)) {
+                        const item = selectedItem()
+                        if (item) { copyItem(item, true); return Gdk.EVENT_STOP }
+                        return Gdk.EVENT_PROPAGATE
+                    }
+                    // Delete moves the selected item to trash
+                    if (keyval === Gdk.KEY_Delete || keyval === Gdk.KEY_KP_Delete) {
+                        const item = selectedItem()
+                        if (item) { trashItem(item); return Gdk.EVENT_STOP }
+                    }
+                    return Gdk.EVENT_PROPAGATE
+                })
+                self.add_controller(keys)
             }}
         >
-            <overlay>
+            <overlay
+                $={(self) => {
+                    pasteMenu.set_parent(self)
+                    onCleanup(() => pasteMenu.unparent())
+
+                    // clicking empty desktop space clears the selection
+                    // (CAPTURE: the flowbox would claim clicks in its column)
+                    const click = new Gtk.GestureClick()
+                    click.set_button(Gdk.BUTTON_PRIMARY)
+                    click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                    click.connect("pressed", (_gesture, _n, x, y) => {
+                        if (!overIcon(self, x, y)) flowBoxRef?.unselect_all()
+                    })
+                    self.add_controller(click)
+
+                    // right-click on empty space: paste menu at the pointer
+                    const rightClick = new Gtk.GestureClick()
+                    rightClick.set_button(Gdk.BUTTON_SECONDARY)
+                    rightClick.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                    rightClick.connect("pressed", (_gesture, _n, x, y) => {
+                        if (overIcon(self, x, y)) return // icon menu handles it
+                        pasteBtn.sensitive = clipboardHasFiles()
+                        pasteMenu.set_pointing_to(new Gdk.Rectangle({
+                            x: Math.round(x), y: Math.round(y), width: 1, height: 1,
+                        }))
+                        pasteMenu.popup()
+                    })
+                    self.add_controller(rightClick)
+                }}
+            >
             {/* 1×1 near-invisible node: with the last icon removed the window's
                 render tree would be empty and GTK never commits the final
                 cleared frame — the compositor keeps showing the stale icon
@@ -301,13 +518,6 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 $={(self) => {
                     flowBoxRef = self
 
-                    // clicking empty desktop space clears the selection
-                    const click = new Gtk.GestureClick()
-                    click.connect("pressed", (_gesture, _n, x, y) => {
-                        if (!self.get_child_at_pos(x, y)) self.unselect_all()
-                    })
-                    self.add_controller(click)
-
                     // Enter opens the selected item (keyboard counterpart of
                     // the double click)
                     self.connect("child-activated", (_fb, child: Gtk.FlowBoxChild) => {
@@ -315,20 +525,6 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                         const item = inner ? itemByBox.get(inner) : undefined
                         if (item) openItem(item)
                     })
-
-                    // Delete moves the selected item to trash
-                    const keys = new Gtk.EventControllerKey()
-                    keys.connect("key-pressed", (_controller, keyval) => {
-                        if (keyval !== Gdk.KEY_Delete && keyval !== Gdk.KEY_KP_Delete)
-                            return Gdk.EVENT_PROPAGATE
-                        const child = self.get_selected_children()[0]
-                        const inner = child?.get_child()
-                        const item = inner ? itemByBox.get(inner) : undefined
-                        if (!item) return Gdk.EVENT_PROPAGATE
-                        trashItem(item)
-                        return Gdk.EVENT_STOP
-                    })
-                    self.add_controller(keys)
                 }}
             >
                 <For each={items}>

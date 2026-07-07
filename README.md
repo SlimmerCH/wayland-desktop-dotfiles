@@ -154,7 +154,9 @@ The contents of `~/Desktop` (your XDG desktop folder) appear as icons on the
 wallpaper, always behind your windows. Double-click (or Enter) opens a file
 with its default application (`.desktop` launchers start their app, folders
 open in your file manager), Delete moves the selection to trash, and
-right-click offers Open / Open With… / Show in Files / Move to Trash.
+right-click offers Open / Open With… / Copy / Cut / Show in Files / Move to
+Trash. Ctrl+C/X/V copy, cut and paste files — interoperable with your file
+manager in both directions — and right-clicking empty space offers Paste.
 The layer updates live as files come and go. Disable it with the
 `desktop_icons` setting.
 
