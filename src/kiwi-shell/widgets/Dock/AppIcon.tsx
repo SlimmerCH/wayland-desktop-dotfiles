@@ -7,6 +7,7 @@ import { DockContextIcon } from "./dock-utils"
 import { iconForEntry, entryForClient, AppIconImage } from "../appIcon"
 import { captureWindowToTexture } from "../AppSwitcher/clientCachingService"
 import { conf } from "../config"
+import { logDebug } from "../../debug"
 
 export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v: boolean) => void }) {
     const icon = iconForEntry(entry)
@@ -57,14 +58,27 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     let openTimer: ReturnType<typeof setTimeout> | null = null
     let closeTimer: ReturnType<typeof setTimeout> | null = null
     const cancelOpen = () => { if (openTimer) { clearTimeout(openTimer); openTimer = null } }
-    const cancelClose = () => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null } }
+    const cancelClose = () => {
+        logDebug(`[preview:${entry}] cancelClose (had timer: ${closeTimer !== null})`)
+        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
+    }
     const scheduleClose = () => {
         cancelClose()
-        closeTimer = setTimeout(() => previews.popdown(), PREVIEW_HOVER_CLOSE_MS)
+        closeTimer = setTimeout(() => {
+            logDebug(`[preview:${entry}] close timer FIRED → popdown`)
+            closeTimer = null
+            previews.popdown()
+        }, PREVIEW_HOVER_CLOSE_MS)
     }
     const previewsMotion = new Gtk.EventControllerMotion()
-    previewsMotion.connect("enter", () => cancelClose())
-    previewsMotion.connect("leave", () => scheduleClose())
+    previewsMotion.connect("enter", () => {
+        logDebug(`[preview:${entry}] popover ENTER`)
+        cancelClose()
+    })
+    previewsMotion.connect("leave", () => {
+        logDebug(`[preview:${entry}] popover LEAVE`)
+        scheduleClose()
+    })
     previews.add_controller(previewsMotion)
 
     return (
@@ -110,6 +124,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
 
                     const hover = new Gtk.EventControllerMotion()
                     hover.connect("enter", () => {
+                        logDebug(`[preview:${entry}] icon ENTER`)
                         cancelClose()
                         cancelOpen()
                         openTimer = setTimeout(() => {
@@ -118,6 +133,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                         }, PREVIEW_HOVER_OPEN_MS)
                     })
                     hover.connect("leave", () => {
+                        logDebug(`[preview:${entry}] icon LEAVE`)
                         cancelOpen()
                         scheduleClose()
                     })
@@ -175,14 +191,17 @@ function WindowPreviews(
             $={(self) => {
                 popover = self
                 self.connect("notify::visible", () => {
+                    logDebug(`[preview] popover notify::visible → ${self.visible}`)
                     setOpen(self.visible)
                     setMenuOpen(self.visible)
                 })
                 // closing the last window from the picker leaves nothing
                 // to show — dismiss instead of floating an empty pill
                 createEffect(() => {
-                    if (clientsBinding().length === 0 && popover.visible)
+                    if (clientsBinding().length === 0 && popover.visible) {
+                        logDebug(`[preview] popdown via empty clientsBinding effect`)
                         popover.popdown()
+                    }
                 })
             }}
         >

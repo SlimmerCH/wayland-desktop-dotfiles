@@ -1,4 +1,5 @@
 import { Gtk } from "ags/gtk4"
+import Pango from "gi://Pango"
 import { exec, execAsync } from "ags/process"
 import { createState, createBinding, createComputed, With } from "ags"
 import { createPoll } from "ags/time"
@@ -10,6 +11,7 @@ import Notifd from "gi://AstalNotifd"
 
 
 import { MediaPlayer } from "../../../Misc"
+import { KeyedList } from "../../../KeyedList"
 import { Icon, powerProfileIcon, volumeIcon, brightnessIcon } from "../../../iconNames"
 import { brightness, setBrightnessLevel } from "../../../brightness"
 import { closeSystemMenu } from "../SystemMenu";
@@ -34,6 +36,7 @@ const powerprofiles = AstalPowerProfiles.get_default()
 
 
 const speakerBinding = createBinding(wp.audio, "defaultSpeaker")
+const speakersBinding = createBinding(wp.audio, "speakers")
 const micMutedBinding = createBinding(mic, "mute")
 const powerProfileBinding = createBinding(powerprofiles, "activeProfile");
 
@@ -200,9 +203,53 @@ function OptionButtons(){
   )
 }
 
-function Sliders() {
+function AudioDevices({ close }) {
   return (
-    <box class="sliders" orientation={Gtk.Orientation.VERTICAL}>
+    <KeyedList
+      each={speakersBinding}
+      keyFn={(spk) => String(spk.id)}
+      orientation={Gtk.Orientation.VERTICAL}
+      spacing={4}
+      children={(spk) => {
+        // Bind to the endpoint's own is-default: it fires notify::is-default on
+        // BOTH the newly-selected and the deselected endpoint (verified for
+        // in-app set_is_default and external wpctl/pavucontrol), so exactly one
+        // checkmark shows and it tracks changes made outside the menu too.
+        // (wp.audio's notify::default-speaker does NOT fire reliably, so a
+        // defaultSpeaker binding would go stale.)
+        const isDefault = createBinding(spk, "isDefault")
+        return (
+          <button
+            class={isDefault.as(d => d ? "menu-item active" : "menu-item")}
+            onClicked={() => { spk.set_is_default(true); close() }}
+          >
+            <box spacing={6}>
+              <label
+                label={spk.description ?? spk.name ?? "Unknown Device"}
+                xalign={0}
+                hexpand={true}
+                maxWidthChars={24}
+                ellipsize={Pango.EllipsizeMode.END}
+              />
+              <Gtk.Image
+                class="check"
+                iconName="object-select-symbolic"
+                pixelSize={14}
+                visible={isDefault}
+              />
+            </box>
+          </button>
+        )
+      }}
+    />
+  )
+}
+
+function VolumeSlider() {
+  const [devOpen, setDevOpen] = createState(false)
+
+  return (
+    <box orientation={Gtk.Orientation.VERTICAL}>
       <With value={speakerBinding}>
         {(spk) => {
           if (!spk) {
@@ -240,10 +287,34 @@ function Sliders() {
                   spk.mute = false
                 }}
               />
+              <button class="bar-button audio-devices-toggle" onClicked={() => setDevOpen(v => !v)}>
+                <Gtk.Image
+                  class="arrow-button"
+                  iconName={devOpen(v => v ? "go-up-symbolic" : "go-down-symbolic")}
+                  pixelSize={16}
+                  hexpand={false}
+                />
+              </button>
             </box>
           )
         }}
       </With>
+      <revealer
+        reveal_child={devOpen}
+        transition_type={Gtk.RevealerTransitionType.SLIDE_DOWN}
+      >
+        <box class="tiny-dropdown audio-devices" orientation={Gtk.Orientation.VERTICAL} marginTop={4} marginBottom={2}>
+          <AudioDevices close={() => setDevOpen(false)} />
+        </box>
+      </revealer>
+    </box>
+  )
+}
+
+function Sliders() {
+  return (
+    <box class="sliders" orientation={Gtk.Orientation.VERTICAL}>
+      <VolumeSlider />
       <box visible={hasBacklight} class="slider-container">
         <button class="bar-button">
           <Icon 
