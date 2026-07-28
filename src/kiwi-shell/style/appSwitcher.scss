@@ -1,5 +1,7 @@
 .app-switch-container {
-    background-color: rgba(32, 32, 32, 0.75);
+    // lowered alpha (from 0.75) so the Hyprland layer blur reads through as
+    // frosted glass, while staying >= the layerrule ignore_alpha 0.5 threshold
+    background-color: rgba(32, 32, 32, 0.55);
     padding: 24px;
     border-radius: 8px;
 }

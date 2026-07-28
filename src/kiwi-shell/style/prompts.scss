@@ -3,7 +3,9 @@
 }
 
 .prompt-container {
-    background-color: #000;
+    // translucent (>= layerrule ignore_alpha 0.5) so Hyprland's layer blur
+    // reads through as frosted glass instead of solid black
+    background-color: rgba(0, 0, 0, 0.6);
     padding: 24px;
     border-radius: 12px;
     min-width: 275px;
