@@ -3,7 +3,10 @@
 }
 
 .launcher-panel {
-    background: rgba(28, 28, 32, 0.86);
+    // 0.86 was too opaque for the Hyprland layer blur to read through —
+    // 0.62 lets the frosted-glass effect show while staying above the
+    // layerrule ignore_alpha 0.5 threshold
+    background: rgba(28, 28, 32, 0.62);
     border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 26px;
     padding: 8px;
