@@ -106,7 +106,7 @@
     }
 }
 
-.expand-button {
+.group-toggle {
     background: none;
     background-image: none;
     border: none;
@@ -121,6 +121,14 @@
         color: #fff;
         background-color: rgba(255, 255, 255, 0.08);
     }
+}
+
+// collapsed group head: two offset bars peek out below the card, macOS-style
+.notification.stacked {
+    box-shadow:
+        0 6px 0 -3px rgba(90, 90, 90, 0.9),
+        0 11px 0 -6px rgba(60, 60, 60, 0.9);
+    margin-bottom: 12px;
 }
 
 .actions {

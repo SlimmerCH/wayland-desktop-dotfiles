@@ -47,6 +47,8 @@ export function closeNc() {
     ncCloseTimer = setTimeout(() => {
         ncCloseTimer = null
         setNcClosing(false)
+        // collapse groups again once the window is unmapped (invisible relayout)
+        setExpandedGroups(new Set())
     }, NC_SLIDE_MS + 60)
 }
 
@@ -198,14 +200,42 @@ notifd.connect("resolved", (_, id) => {
     })
 })
 
+// ─── macOS-style grouping ─────────────────────────────────────────────────────
+// Center entries are grouped by app: a collapsed group shows only its newest
+// card (with an "N more" affordance and a stacked look), expanding lists all.
+// Banners are never grouped — only expired cards while the center is open.
+const groupKeyOf = (n: Notifd.Notification) =>
+    n.appName || n.desktopEntry || "unknown"
+
+const [expandedGroups, setExpandedGroups] = createState<Set<string>>(new Set())
+
+function toggleGroup(key: string) {
+    setExpandedGroups(s => {
+        const next = new Set(s)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+    })
+}
+
 // One unified list: banners and center entries are the same widgets, so
 // opening the center never recreates or moves cards (no visual glitches) —
 // per-card visibility just changes with the phase and center state.
-const allNotifs = createComputed(get =>
-    [...get(notifState).keys()]
+// Group members are kept contiguous, with groups ordered by their newest
+// member (the map is already newest-first).
+const allNotifs = createComputed(get => {
+    const notifs = [...get(notifState).keys()]
         .map(id => notifd.get_notification(id))
         .filter(Boolean) as Notifd.Notification[]
-)
+    const groups = new Map<string, Notifd.Notification[]>()
+    for (const n of notifs) {
+        const k = groupKeyOf(n)
+        const g = groups.get(k)
+        if (g) g.push(n)
+        else groups.set(k, [n])
+    }
+    return [...groups.values()].flat()
+})
 
 const anyBanner = createComputed(get =>
     [...get(notifState).values()].some(p => p !== "expired")
@@ -459,14 +489,25 @@ function Notification({ n }: { n: Notifd.Notification }) {
     const body = createBinding(n, "body")
     const timeLabel = nowSec(now => formatRelativeTime(n.time, now))
 
-    // long bodies are clamped to 4 lines; when the text actually gets
-    // ellipsized a more/less control expands the card downwards
-    const [expanded, setExpanded] = createState(false)
-    const [clipped, setClipped] = createState(false)
-    const expandable = createComputed(get => get(clipped) || get(expanded))
-
     const { icon, image } = notifVisuals(n)
     const actionButtons = (n.actions ?? []).filter(a => a.id !== "default")
+
+    // group bookkeeping: expired members of this card's app, newest first
+    const groupKey = groupKeyOf(n)
+    const groupInfo = createComputed(get => {
+        const state = get(notifState)
+        const members = get(allNotifs).filter(o =>
+            groupKeyOf(o) === groupKey && state.get(o.id) === "expired")
+        return { size: members.length, isHead: members[0]?.id === n.id }
+    })
+    const groupExpanded = createComputed(get => get(expandedGroups).has(groupKey))
+    // collapsed head of a multi-card group gets the macOS stacked-cards look
+    const stacked = createComputed(get =>
+        get(phase) === "expired" &&
+        get(groupInfo).isHead &&
+        get(groupInfo).size > 1 &&
+        !get(groupExpanded)
+    )
 
     let wrap: Gtk.Widget | null = null
 
@@ -483,11 +524,15 @@ function Notification({ n }: { n: Notifd.Notification }) {
     }
 
     // banners are visible unless dnd hides them; center entries only while the
-    // center is open or flying out
+    // center is open or flying out — and, within a collapsed group, only the
+    // newest card
     const cardVisible = createComputed(get => {
         const p = get(phase)
         if (p === undefined) return false
-        if (p === "expired") return get(ncShown)
+        if (p === "expired") {
+            if (!get(ncShown)) return false
+            return get(groupInfo).isHead || get(groupExpanded)
+        }
         return get(ncOpen) || !get(dnd)
     })
 
@@ -574,6 +619,13 @@ function Notification({ n }: { n: Notifd.Notification }) {
                         if (n.urgency === Notifd.Urgency.CRITICAL) {
                             self.add_css_class("critical")
                         }
+                        const applyStacked = () => {
+                            if (stacked()) self.add_css_class("stacked")
+                            else self.remove_css_class("stacked")
+                        }
+                        applyStacked()
+                        const unsubStacked = stacked.subscribe(applyStacked)
+                        onCleanup(unsubStacked)
                         // a plain gesture instead of a button: clicks on nested
                         // buttons/links must not fall through to the card action
                         const click = new Gtk.GestureClick()
@@ -583,6 +635,13 @@ function Notification({ n }: { n: Notifd.Notification }) {
                             for (let w: Gtk.Widget | null = target; w && w !== self; w = w.get_parent()) {
                                 if (w instanceof Gtk.Button) return
                                 if (w instanceof Gtk.Label && w.get_current_uri()) return
+                            }
+                            // macOS: clicking a collapsed stack expands the
+                            // group; only an expanded (or single) card activates
+                            if (stacked()) {
+                                toggleGroup(groupKey)
+                                requestNcResize()
+                                return
                             }
                             activate()
                         })
@@ -618,10 +677,8 @@ function Notification({ n }: { n: Notifd.Notification }) {
                                 visible={body.as(b => String(b ?? "").trim() !== "")}
                                 wrap
                                 wrapMode={Pango.WrapMode.WORD_CHAR}
-                                ellipsize={expanded.as(e =>
-                                    e ? Pango.EllipsizeMode.NONE : Pango.EllipsizeMode.END
-                                )}
-                                lines={expanded.as(e => (e ? -1 : 4))}
+                                ellipsize={Pango.EllipsizeMode.END}
+                                lines={4}
                                 maxWidthChars={1}
                                 hexpand
                                 xalign={0}
@@ -630,46 +687,8 @@ function Notification({ n }: { n: Notifd.Notification }) {
                                         openUri(uri)
                                         return true
                                     })
-                                    // the layout only knows whether it ellipsized
-                                    // after it has been laid out once
-                                    const checkClipped = () => {
-                                        if (!self.get_mapped() || expanded()) return
-                                        setClipped(self.get_layout()?.is_ellipsized() ?? false)
-                                    }
-                                    self.connect("map", () => {
-                                        self.add_tick_callback(() => {
-                                            checkClipped()
-                                            return GLib.SOURCE_REMOVE
-                                        })
-                                    })
-                                    const unsubBody = body.subscribe(() => {
-                                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                                            checkClipped()
-                                            return GLib.SOURCE_REMOVE
-                                        })
-                                    })
-                                    onCleanup(unsubBody)
                                 }}
                             />
-                            <button
-                                class="expand-button"
-                                visible={expandable}
-                                halign={Gtk.Align.START}
-                                onClicked={() => {
-                                    setExpanded(!expanded())
-                                    requestNcResize()
-                                }}
-                            >
-                                <box spacing={2}>
-                                    <label label={expanded.as(e => (e ? "less" : "more"))} />
-                                    <Gtk.Image
-                                        iconName={expanded.as(e =>
-                                            e ? "pan-up-symbolic" : "pan-down-symbolic"
-                                        )}
-                                        pixelSize={10}
-                                    />
-                                </box>
-                            </button>
                             {actionButtons.length > 0 && (
                                 <box class="actions" spacing={6} halign={Gtk.Align.END}>
                                     {actionButtons.map(action => (
@@ -691,6 +710,33 @@ function Notification({ n }: { n: Notifd.Notification }) {
                                     ))}
                                 </box>
                             )}
+                            <button
+                                class="group-toggle"
+                                visible={createComputed(get => {
+                                    const gi = get(groupInfo)
+                                    return get(phase) === "expired" &&
+                                        gi.isHead && gi.size > 1
+                                })}
+                                halign={Gtk.Align.START}
+                                onClicked={() => {
+                                    toggleGroup(groupKey)
+                                    requestNcResize()
+                                }}
+                            >
+                                <box spacing={2}>
+                                    <label label={createComputed(get =>
+                                        get(groupExpanded)
+                                            ? "show less"
+                                            : `${get(groupInfo).size - 1} more`
+                                    )} />
+                                    <Gtk.Image
+                                        iconName={groupExpanded.as(e =>
+                                            e ? "pan-up-symbolic" : "pan-down-symbolic"
+                                        )}
+                                        pixelSize={10}
+                                    />
+                                </box>
+                            </button>
                         </box>
                         {image}
                     </box>
