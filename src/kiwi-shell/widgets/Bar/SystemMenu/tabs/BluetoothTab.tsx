@@ -93,6 +93,7 @@ export default function BluetoothTab({ visible }) {
         orientation={Gtk.Orientation.VERTICAL}
         spacing={4}
         vexpand={true}
+        visible={bluetoothEnabledBinding}
       >
         {devicesBinding && (
           <KeyedList
@@ -105,7 +106,7 @@ export default function BluetoothTab({ visible }) {
         )}
       </box>
 
-      <box class="section-header mt">
+      <box class="section-header mt" visible={bluetoothEnabledBinding}>
         <box halign={Gtk.Align.START}>Other Devices</box>
         <box hexpand={true} />
       </box>
@@ -115,6 +116,7 @@ export default function BluetoothTab({ visible }) {
         orientation={Gtk.Orientation.VERTICAL}
         spacing={4}
         vexpand={true}
+        visible={bluetoothEnabledBinding}
       >
         {devicesBinding && (
           <KeyedList
@@ -135,16 +137,19 @@ function Device({ device, paired }) {
   const connectedBinding = createBinding(device, "connected")
   const deviceName = createBinding(device, "name")
   const pairedBinding = createBinding(device, "paired")
+  const trustedBinding = createBinding(device, "trusted")
 
   const visibility = createComputed((get) => {
     const name = get(deviceName)
     const isMac = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(name)
-    // A device belongs in the "known" (paired) section if it is paired OR
-    // currently connected — a connected device should never sit under "Other
-    // Devices". Reading connectedBinding here also makes this computed re-run on
-    // every connect/disconnect (that notify fires reliably), which re-reads
-    // `paired` and masks any lag in notify::paired.
-    const known = get(pairedBinding) || get(connectedBinding)
+    // "Other Devices" is strictly for devices that are discoverable RIGHT NOW
+    // (in pairing mode). bluez auto-purges unpaired+untrusted registry entries
+    // ~30s after discovery ends, so anything that isn't paired/connected/trusted
+    // IS a live discovery. Trusted covers the bond-drop relic case (e.g.
+    // AirPods re-keying gets refused, Paired flips to no but Trusted survives):
+    // such a device is one of ours and must never fall under "Other Devices" —
+    // it stays in the known section, where a click re-pairs it.
+    const known = get(pairedBinding) || get(connectedBinding) || get(trustedBinding)
     return known === paired && !!name && !isMac
   })
 
