@@ -23,7 +23,7 @@ import {
   startBluetoothDiscovery,
   stopBluetoothDiscovery,
 } from "./tabs/BluetoothTab"
-import { exec } from "ags/process"
+import { exec, execAsync } from "ags/process"
 
 const network = Network.get_default()
 const wifi = network.wifi
@@ -46,6 +46,43 @@ if (hasBattery) {
     }
     playSound("charging.mp3")
   })
+}
+
+// Low/critical battery notifications: warn once at 10%, alert once at 5%
+// (critical urgency stays on screen until dismissed). Re-armed by charging.
+const BAT_WARN = 0.10
+const BAT_CRITICAL = 0.05
+
+if (hasBattery) {
+  let warnedLow = false
+  let warnedCritical = false
+
+  const checkBattery = () => {
+    if (battery.charging) {
+      warnedLow = false
+      warnedCritical = false
+      return
+    }
+    const p = battery.percentage
+    const pct = `${Math.round(p * 100)}%`
+    if (p <= BAT_CRITICAL && !warnedCritical) {
+      warnedCritical = true
+      execAsync([
+        "notify-send", "-u", "critical", "-i", "battery-caution-symbolic",
+        "-a", "Battery", "Battery critically low",
+        `${pct} remaining — connect the charger now`,
+      ])
+    } else if (p <= BAT_WARN && !warnedLow) {
+      warnedLow = true
+      execAsync([
+        "notify-send", "-u", "normal", "-i", "battery-low-symbolic",
+        "-a", "Battery", "Battery low", `${pct} remaining`,
+      ])
+    }
+  }
+
+  batPercent.subscribe(checkBattery)
+  batCharging.subscribe(checkBattery)
 }
 
 let systemMenuPopover: Gtk.Popover | null = null
