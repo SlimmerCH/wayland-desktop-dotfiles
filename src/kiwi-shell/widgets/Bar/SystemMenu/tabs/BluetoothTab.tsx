@@ -139,7 +139,13 @@ function Device({ device, paired }) {
   const visibility = createComputed((get) => {
     const name = get(deviceName)
     const isMac = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(name)
-    return get(pairedBinding) == paired && name && !isMac
+    // A device belongs in the "known" (paired) section if it is paired OR
+    // currently connected — a connected device should never sit under "Other
+    // Devices". Reading connectedBinding here also makes this computed re-run on
+    // every connect/disconnect (that notify fires reliably), which re-reads
+    // `paired` and masks any lag in notify::paired.
+    const known = get(pairedBinding) || get(connectedBinding)
+    return known === paired && !!name && !isMac
   })
 
   const hasIcon = iconBinding.as((s) => !!s)
@@ -224,12 +230,19 @@ function DeviceContextMenu(device, connectedBinding, pairedBinding) {
 
 function connectDevice(device) {
   logDebug("Connecting to", device.name)
+  // Connecting/pairing while the adapter is actively scanning makes the
+  // controller time-slice between scan and connect, which causes Page Timeout /
+  // AuthenticationTimeout. Pause discovery for the operation and resume it
+  // afterwards if the tab is still open (bluetoothctl does the same implicitly).
+  stopBluetoothDiscovery()
   device.connect_device((source, result) => {
     try {
       device.connect_device_finish(result)
       logDebug("Connected successfully!")
     } catch (err) {
       console.error("Connect failed:", err)
+    } finally {
+      if (bluetoothTabOpen()) startBluetoothDiscovery()
     }
   })
 }
@@ -248,7 +261,31 @@ function disconnectDevice(device) {
 
 function pairDevice(device) {
   logDebug("Pairing with", device.name)
-  device.pair()
+  // pair() is a SYNCHRONOUS bluez call that throws on failure (unlike
+  // connect/disconnect which are async) — it blocks the shell until pairing
+  // completes or times out. It must be wrapped: the context-menu "Pair &
+  // Connect" button calls this with no try/catch, so an uncaught throw here
+  // used to crash the handler.
+  // Pause scanning first: pairing while discovery runs is a common cause of the
+  // AuthenticationTimeout / Page Timeout failures seen with these mice.
+  stopBluetoothDiscovery()
+  try {
+    device.pair()
+  } catch (err) {
+    // AlreadyExists → the device is in fact already paired at the bluez level;
+    // fall through to connecting it. Any other error (AuthenticationTimeout /
+    // AuthenticationFailed / ConnectionAttemptFailed "Page Timeout") means the
+    // device didn't complete pairing — surface it and stop rather than
+    // connect-spam. connectDevice() manages discovery itself.
+    if (String(err).includes("AlreadyExists")) {
+      device.trusted = true
+      connectDevice(device)
+    } else {
+      console.error("Pair failed:", err)
+      if (bluetoothTabOpen()) startBluetoothDiscovery()
+    }
+    return
+  }
   device.trusted = true
   connectDevice(device)
 }
@@ -264,12 +301,15 @@ function forgetDevice(device) {
 
 async function handleDeviceClick(device) {
   try {
-    if (!device.paired) {
-      pairDevice(device)
-    } else if (!device.connected) {
+    // Check connected first so a connected device always disconnects, and only
+    // truly-unpaired devices go through pair(). A paired-but-disconnected device
+    // (e.g. an MX Master re-appearing) connects rather than re-pairing.
+    if (device.connected) {
+      disconnectDevice(device)
+    } else if (device.paired) {
       connectDevice(device)
     } else {
-      disconnectDevice(device)
+      pairDevice(device)
     }
   } catch (error) {
     console.error("Bluetooth operation failed:", error)
