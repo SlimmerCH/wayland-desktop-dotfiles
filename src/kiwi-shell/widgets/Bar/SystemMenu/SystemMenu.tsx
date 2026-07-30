@@ -106,6 +106,14 @@ export const bluetoothTabOpen = createComputed((get) => {
   return get(activeTab) === 2 && get(systemMenuOpen)
 })
 
+// hardware gauges poll only while they are actually on screen
+const performanceTabOpen = createComputed((get) => {
+  return get(activeTab) === 3 && get(systemMenuOpen)
+})
+performanceTabOpen.subscribe(() =>
+  setHardwarePolling(performanceTabOpen.get()),
+)
+
 const tabs = [
   { name: "settings", icon: "system-settings-symbolic", enabled: true },
   { name: "network", icon: "network-wireless-symbolic", enabled: wifi },
@@ -135,7 +143,6 @@ export default function SystemMenu() {
       $={(self) => (systemMenuPopover = self)}
       onShow={() => {
         setSystemMenuOpen(true)
-        setHardwarePolling(true)
         closeNc()
         if (activeTab.get() === 1) {
           rescanWifi()
@@ -148,7 +155,6 @@ export default function SystemMenu() {
       }}
       onClosed={() => {
         setSystemMenuOpen(false)
-        setHardwarePolling(false)
         try {
           stopBluetoothDiscovery()
         } catch {}
