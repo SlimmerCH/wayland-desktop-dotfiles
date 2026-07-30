@@ -461,6 +461,34 @@ items.subscribe(relayout)
 // placement mode, dock mode (exclusive zone!) etc. all live in the config
 conf.subscribe(relayout)
 
+// reservedInsets() depends on the other shell windows' sizes, which are 0
+// until the compositor allocates them — re-layout exactly when they change
+// instead of guessing with timers
+const watchedSurfaces = new WeakSet<Gdk.Surface>()
+
+function watchWindow(win: Gtk.Window) {
+    if (!(win instanceof Astal.Window) || win.name === "ags-desktop") return
+    const attach = () => {
+        const surface = win.get_surface()
+        if (!surface || watchedSurfaces.has(surface)) return
+        watchedSurfaces.add(surface)
+        surface.connect("notify::height", relayout)
+        surface.connect("notify::width", relayout)
+    }
+    if (win.get_realized()) attach()
+    win.connect("realize", attach)
+    // dock flips exclusivity/visibility with its autohide mode
+    win.connect("notify::exclusivity", relayout)
+    win.connect("notify::visible", relayout)
+}
+
+app.get_windows().forEach(watchWindow)
+app.connect("window-added", (_app: unknown, win: Gtk.Window) => {
+    watchWindow(win)
+    relayout()
+})
+app.connect("window-removed", relayout)
+
 selected.subscribe(() => {
     const sel = selected.get()
     for (const [path, w] of iconWidgets) {
@@ -983,13 +1011,6 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 $={(self) => {
                     fixedRef = self
                     relayout()
-                    // bar/dock may not be allocated yet on the first pass —
-                    // their exclusive-zone heights read 0 and icons would
-                    // hide beneath them; lay out again once settled
-                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-                        relayout()
-                        return GLib.SOURCE_REMOVE
-                    })
                 }}
             />
             </overlay>
