@@ -19,7 +19,19 @@
             background: rgba(255, 255, 255, 0.16);
             box-shadow: none;
         }
+
+        // folder icon currently hovered by a file drag
+        &.drop-hover {
+            background: rgba(255, 255, 255, 0.24);
+        }
     }
+}
+
+// marquee drawn while drag-selecting over empty desktop space
+.rubberband {
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 2px;
 }
 
 // must actually paint something (see Desktop.tsx) — 1% black on one pixel

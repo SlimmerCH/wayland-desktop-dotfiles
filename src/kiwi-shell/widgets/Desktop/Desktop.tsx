@@ -154,18 +154,23 @@ function getClipboard(): Gdk.Clipboard {
     return Gdk.Display.get_default()!.get_clipboard()
 }
 
-function copyItem(item: DesktopItem, cut = false) {
-    const uri = GLib.filename_to_uri(item.path, null)
+function fileContentProvider(uris: string[], cut = false): Gdk.ContentProvider {
     const enc = new TextEncoder()
     // x-gnome-copied-files carries the copy/cut verb for file managers,
     // text/uri-list is the fallback everything else understands
-    getClipboard().set_content(Gdk.ContentProvider.new_union([
+    return Gdk.ContentProvider.new_union([
         Gdk.ContentProvider.new_for_bytes("application/x-gnome-copied-files",
-            GLib.Bytes.new(enc.encode(`${cut ? "cut" : "copy"}\n${uri}`))),
+            GLib.Bytes.new(enc.encode(`${cut ? "cut" : "copy"}\n${uris.join("\n")}`))),
         Gdk.ContentProvider.new_for_bytes("text/uri-list",
-            GLib.Bytes.new(enc.encode(`${uri}\r\n`))),
-    ]))
-    logDebug(`[Desktop] ${cut ? "cut" : "copied"} ${item.path}`)
+            GLib.Bytes.new(enc.encode(uris.map((u) => `${u}\r\n`).join("")))),
+    ])
+}
+
+function copyItems(items: DesktopItem[], cut = false) {
+    if (items.length === 0) return
+    const uris = items.map((i) => GLib.filename_to_uri(i.path, null))
+    getClipboard().set_content(fileContentProvider(uris, cut))
+    logDebug(`[Desktop] ${cut ? "cut" : "copied"} ${items.length} item(s)`)
 }
 
 function clipboardHasFiles(): boolean {
@@ -174,9 +179,9 @@ function clipboardHasFiles(): boolean {
         || formats.contain_mime_type("text/uri-list")
 }
 
-// first free variant of `name` in the desktop dir: name, name (2), name (3)…
-function uniqueDest(name: string): Gio.File {
-    const dir = Gio.File.new_for_path(DESKTOP_DIR)
+// first free variant of `name` in `dirPath`: name, name (2), name (3)…
+function uniqueDest(name: string, dirPath = DESKTOP_DIR): Gio.File {
+    const dir = Gio.File.new_for_path(dirPath)
     let dest = dir.get_child(name)
     if (!dest.query_exists(null)) return dest
     const dot = name.startsWith(".") ? -1 : name.lastIndexOf(".")
@@ -188,15 +193,17 @@ function uniqueDest(name: string): Gio.File {
     }
 }
 
-function pasteUris(uris: string[], cut: boolean) {
+function pasteUris(uris: string[], cut: boolean, destDir = DESKTOP_DIR) {
     for (const uri of uris) {
         const src = Gio.File.new_for_uri(uri)
         const srcPath = src.get_path()
         const name = src.get_basename()
         if (!srcPath || !name) continue
-        // cutting a desktop file onto the desktop would just rename it
-        if (cut && src.get_parent()?.get_path() === DESKTOP_DIR) continue
-        const dest = uniqueDest(name)
+        // a folder can't be transferred into itself
+        if (srcPath === destDir) continue
+        // cutting a file onto its own directory would just rename it
+        if (cut && src.get_parent()?.get_path() === destDir) continue
+        const dest = uniqueDest(name, destDir)
         // argv spawn (no shell quoting pitfalls); cp/mv recurse into
         // folders and keep the shell responsive on big files
         const argv = cut
@@ -250,10 +257,37 @@ function pasteFromClipboard() {
         })
 }
 
-function selectedItem(): DesktopItem | undefined {
-    const child = flowBoxRef?.get_selected_children()[0]
-    const inner = child?.get_child()
-    return inner ? itemByBox.get(inner) : undefined
+function selectedItems(): DesktopItem[] {
+    const out: DesktopItem[] = []
+    for (const child of flowBoxRef?.get_selected_children() ?? []) {
+        const inner = child.get_child()
+        const item = inner ? itemByBox.get(inner) : undefined
+        if (item) out.push(item)
+    }
+    return out
+}
+
+// the FlowBoxChild wrapping a widget (icon boxes are grandchildren)
+function flowBoxChildOf(widget: Gtk.Widget): Gtk.FlowBoxChild | null {
+    for (let w: Gtk.Widget | null = widget; w; w = w.get_parent())
+        if (w instanceof Gtk.FlowBoxChild) return w
+    return null
+}
+
+// GNOME semantics: file managers offer MOVE (dragging within the session
+// moves), sources that only offer COPY (browsers etc.) copy; holding Ctrl
+// already strips MOVE from the offer upstream, forcing a copy
+function preferredDropAction(target: Gtk.DropTarget): Gdk.DragAction {
+    const actions = target.get_current_drop()?.get_actions() ?? Gdk.DragAction.COPY
+    return actions & Gdk.DragAction.MOVE ? Gdk.DragAction.MOVE : Gdk.DragAction.COPY
+}
+
+function handleFileDrop(value: Gdk.FileList, move: boolean, destDir = DESKTOP_DIR): boolean {
+    const uris = value.get_files().map((f: Gio.File) => f.get_uri())
+    if (uris.length === 0) return false
+    logDebug(`[Desktop] drop ${uris.length} uri(s) (${move ? "move" : "copy"}) → ${destDir}`)
+    pasteUris(uris, move, destDir)
+    return true
 }
 
 // is the picked widget at (x, y) inside a desktop icon?
@@ -283,6 +317,22 @@ function openWithDialog(item: DesktopItem) {
 function DesktopIcon({ item }: { item: DesktopItem }) {
     let menu: Gtk.Popover
 
+    // context-menu / drag actions target the whole selection when the
+    // clicked icon is part of it, just the clicked icon otherwise
+    const targets = () => {
+        const sel = selectedItems()
+        return sel.some((s) => s.path === item.path) ? sel : [item]
+    }
+
+    // clicking (or dragging) an unselected icon makes it the selection
+    const claimSelection = (widget: Gtk.Widget) => {
+        const child = flowBoxChildOf(widget)
+        if (child && !child.is_selected()) {
+            flowBoxRef?.unselect_all()
+            flowBoxRef?.select_child(child)
+        }
+    }
+
     return (
         <box
             orientation={Gtk.Orientation.VERTICAL}
@@ -301,8 +351,54 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
 
                 const rightClick = new Gtk.GestureClick()
                 rightClick.set_button(Gdk.BUTTON_SECONDARY)
-                rightClick.connect("released", () => menu.popup())
+                rightClick.connect("released", () => {
+                    claimSelection(self)
+                    menu.popup()
+                })
                 self.add_controller(rightClick)
+
+                // drag source: uri-list of the selection, so files can be
+                // dragged into nautilus, editors, browsers, upload dialogs…
+                const drag = new Gtk.DragSource()
+                drag.set_actions(Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+                drag.connect("prepare", () => {
+                    claimSelection(self)
+                    const uris = targets().map((i) =>
+                        GLib.filename_to_uri(i.path, null))
+                    logDebug(`[Desktop] drag ${uris.length} item(s)`)
+                    return fileContentProvider(uris)
+                })
+                drag.connect("drag-begin", (source) => {
+                    const theme = Gtk.IconTheme.get_for_display(self.get_display())
+                    const paintable = item.gicon
+                        ? theme.lookup_by_gicon(item.gicon, 48,
+                            self.get_scale_factor(), Gtk.TextDirection.NONE, 0)
+                        : theme.lookup_icon("text-x-generic", null, 48,
+                            self.get_scale_factor(), Gtk.TextDirection.NONE, 0)
+                    source.set_icon(paintable, 24, 24)
+                })
+                self.add_controller(drag)
+
+                // folders accept file drops (from apps AND from other
+                // desktop icons) and receive them like nautilus would
+                if (item.isDir) {
+                    const drop = Gtk.DropTarget.new(Gdk.FileList.$gtype,
+                        Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+                    const child = () => flowBoxChildOf(self)
+                    drop.connect("enter", () => {
+                        child()?.add_css_class("drop-hover")
+                        return preferredDropAction(drop)
+                    })
+                    drop.connect("motion", () => preferredDropAction(drop))
+                    drop.connect("leave", () =>
+                        child()?.remove_css_class("drop-hover"))
+                    drop.connect("drop", (_target, value: Gdk.FileList) => {
+                        child()?.remove_css_class("drop-hover")
+                        const move = preferredDropAction(drop) === Gdk.DragAction.MOVE
+                        return handleFileDrop(value, move, item.path)
+                    })
+                    self.add_controller(drop)
+                }
             }}
         >
             <popover
@@ -314,7 +410,7 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
                 $={(self) => { menu = self }}
             >
                 <box orientation={Gtk.Orientation.VERTICAL} spacing={3}>
-                    <button onclicked={() => { menu.popdown(); openItem(item) }}>
+                    <button onclicked={() => { menu.popdown(); targets().forEach(openItem) }}>
                         <box spacing={6}>
                             <Gtk.Image iconName="document-open-symbolic" pixelSize={16} />
                             <label halign={Gtk.Align.START} label="Open" />
@@ -326,13 +422,13 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
                             <label halign={Gtk.Align.START} label="Open With…" />
                         </box>
                     </button>
-                    <button onclicked={() => { menu.popdown(); copyItem(item) }}>
+                    <button onclicked={() => { menu.popdown(); copyItems(targets()) }}>
                         <box spacing={6}>
                             <Gtk.Image iconName="edit-copy-symbolic" pixelSize={16} />
                             <label halign={Gtk.Align.START} label="Copy" />
                         </box>
                     </button>
-                    <button onclicked={() => { menu.popdown(); copyItem(item, true) }}>
+                    <button onclicked={() => { menu.popdown(); copyItems(targets(), true) }}>
                         <box spacing={6}>
                             <Gtk.Image iconName="edit-cut-symbolic" pixelSize={16} />
                             <label halign={Gtk.Align.START} label="Cut" />
@@ -344,7 +440,7 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
                             <label halign={Gtk.Align.START} label="Show in Files" />
                         </box>
                     </button>
-                    <button onclicked={() => { menu.popdown(); trashItem(item) }}>
+                    <button onclicked={() => { menu.popdown(); targets().forEach(trashItem) }}>
                         <box spacing={6}>
                             <Gtk.Image iconName="user-trash-symbolic" pixelSize={16} />
                             <label halign={Gtk.Align.START} label="Move to Trash" />
@@ -442,19 +538,26 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                         return Gdk.EVENT_STOP
                     }
                     if (ctrl && (keyval === Gdk.KEY_c || keyval === Gdk.KEY_C)) {
-                        const item = selectedItem()
-                        if (item) { copyItem(item); return Gdk.EVENT_STOP }
+                        const items = selectedItems()
+                        if (items.length) { copyItems(items); return Gdk.EVENT_STOP }
                         return Gdk.EVENT_PROPAGATE
                     }
                     if (ctrl && (keyval === Gdk.KEY_x || keyval === Gdk.KEY_X)) {
-                        const item = selectedItem()
-                        if (item) { copyItem(item, true); return Gdk.EVENT_STOP }
+                        const items = selectedItems()
+                        if (items.length) { copyItems(items, true); return Gdk.EVENT_STOP }
                         return Gdk.EVENT_PROPAGATE
                     }
-                    // Delete moves the selected item to trash
+                    if (ctrl && (keyval === Gdk.KEY_a || keyval === Gdk.KEY_A)) {
+                        flowBoxRef?.select_all()
+                        return Gdk.EVENT_STOP
+                    }
+                    // Delete moves the selection to trash
                     if (keyval === Gdk.KEY_Delete || keyval === Gdk.KEY_KP_Delete) {
-                        const item = selectedItem()
-                        if (item) { trashItem(item); return Gdk.EVENT_STOP }
+                        const items = selectedItems()
+                        if (items.length) {
+                            items.forEach(trashItem)
+                            return Gdk.EVENT_STOP
+                        }
                     }
                     return Gdk.EVENT_PROPAGATE
                 })
@@ -467,14 +570,103 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                     onCleanup(() => pasteMenu.unparent())
 
                     // clicking empty desktop space clears the selection
-                    // (CAPTURE: the flowbox would claim clicks in its column)
+                    // (CAPTURE: the flowbox would claim clicks in its column);
+                    // Ctrl-clicks are spared for additive rubber-banding
                     const click = new Gtk.GestureClick()
                     click.set_button(Gdk.BUTTON_PRIMARY)
                     click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-                    click.connect("pressed", (_gesture, _n, x, y) => {
-                        if (!overIcon(self, x, y)) flowBoxRef?.unselect_all()
+                    click.connect("pressed", (gesture, _n, x, y) => {
+                        const ctrl = !!(gesture.get_current_event_state()
+                            & Gdk.ModifierType.CONTROL_MASK)
+                        if (!ctrl && !overIcon(self, x, y)) flowBoxRef?.unselect_all()
                     })
                     self.add_controller(click)
+
+                    // rubber-band selection: drag on empty space draws a
+                    // marquee and selects every icon it touches (Ctrl adds
+                    // to the existing selection, GNOME-style)
+                    const bandLayer = new Gtk.Fixed({
+                        canTarget: false, hexpand: true, vexpand: true,
+                    })
+                    const band = new Gtk.Box({ visible: false, canTarget: false })
+                    band.add_css_class("rubberband")
+                    bandLayer.put(band, 0, 0)
+                    self.add_overlay(bandLayer)
+
+                    const rubber = new Gtk.GestureDrag()
+                    rubber.set_button(Gdk.BUTTON_PRIMARY)
+                    rubber.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                    let bandActive = false
+                    let startX = 0
+                    let startY = 0
+                    // Ctrl-drag adds to whatever was selected at drag start
+                    let keepSelected = new Set<Gtk.FlowBoxChild>()
+                    rubber.connect("drag-begin", (gesture, x, y) => {
+                        // drags starting on an icon are file drags, not bands
+                        if (overIcon(self, x, y)) {
+                            gesture.set_state(Gtk.EventSequenceState.DENIED)
+                            return
+                        }
+                        startX = x
+                        startY = y
+                        bandActive = false
+                        const ctrl = !!(gesture.get_current_event_state()
+                            & Gdk.ModifierType.CONTROL_MASK)
+                        keepSelected = new Set(
+                            ctrl ? flowBoxRef?.get_selected_children() ?? [] : [])
+                    })
+                    rubber.connect("drag-update", (gesture, dx, dy) => {
+                        if (!bandActive && Math.abs(dx) < 6 && Math.abs(dy) < 6)
+                            return
+                        if (!bandActive) {
+                            bandActive = true
+                            // claim so the flowbox never sees the drag
+                            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+                            band.visible = true
+                        }
+                        const rx = Math.min(startX, startX + dx)
+                        const ry = Math.min(startY, startY + dy)
+                        const rw = Math.abs(dx)
+                        const rh = Math.abs(dy)
+                        bandLayer.move(band, rx, ry)
+                        band.set_size_request(
+                            Math.max(1, Math.round(rw)),
+                            Math.max(1, Math.round(rh)))
+                        for (let c = flowBoxRef?.get_first_child(); c; c = c.get_next_sibling()) {
+                            if (!(c instanceof Gtk.FlowBoxChild)) continue
+                            const [ok, b] = c.compute_bounds(self)
+                            const hit = ok
+                                && b.get_x() < rx + rw
+                                && b.get_x() + b.get_width() > rx
+                                && b.get_y() < ry + rh
+                                && b.get_y() + b.get_height() > ry
+                            if (hit || keepSelected.has(c)) flowBoxRef!.select_child(c)
+                            else flowBoxRef!.unselect_child(c)
+                        }
+                    })
+                    rubber.connect("drag-end", () => {
+                        bandActive = false
+                        band.visible = false
+                        band.set_size_request(1, 1)
+                    })
+                    self.add_controller(rubber)
+
+                    // files dragged in from other apps land on the desktop;
+                    // drags that originate from our own icons are ignored
+                    // here (icons auto-arrange) — folder icons handle those
+                    const drop = Gtk.DropTarget.new(Gdk.FileList.$gtype,
+                        Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+                    const external = () => !drop.get_current_drop()?.get_drag()
+                    drop.connect("enter", () =>
+                        external() ? preferredDropAction(drop) : 0)
+                    drop.connect("motion", () =>
+                        external() ? preferredDropAction(drop) : 0)
+                    drop.connect("drop", (_target, value: Gdk.FileList) => {
+                        if (!external()) return false
+                        const move = preferredDropAction(drop) === Gdk.DragAction.MOVE
+                        return handleFileDrop(value, move)
+                    })
+                    self.add_controller(drop)
 
                     // right-click on empty space: paste menu at the pointer
                     const rightClick = new Gtk.GestureClick()
@@ -507,7 +699,7 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             <Gtk.FlowBox
                 class="desktop-icons"
                 orientation={Gtk.Orientation.VERTICAL}
-                selectionMode={Gtk.SelectionMode.SINGLE}
+                selectionMode={Gtk.SelectionMode.MULTIPLE}
                 activateOnSingleClick={false}
                 homogeneous={true}
                 rowSpacing={4}
