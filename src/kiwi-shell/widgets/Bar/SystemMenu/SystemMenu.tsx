@@ -24,16 +24,15 @@ import {
   startBluetoothDiscovery,
   stopBluetoothDiscovery,
 } from "./tabs/BluetoothTab"
-import { exec, execAsync } from "ags/process"
+import { execAsync } from "ags/process"
 import GLib from "gi://GLib"
 
 const network = Network.get_default()
 const wifi = network.wifi
 
-let bluetooth: AstalBluetooth.Adapter | undefined = undefined
-if (exec("hciconfig") !== "") {
-  bluetooth = AstalBluetooth.get_default().adapter
-}
+// .adapter is null when no bluetooth controller is present
+const bluetooth: AstalBluetooth.Adapter | undefined =
+  AstalBluetooth.get_default().adapter ?? undefined
 
 const battery = AstalBattery.get_default()
 const hasBattery = battery.get_is_present()
