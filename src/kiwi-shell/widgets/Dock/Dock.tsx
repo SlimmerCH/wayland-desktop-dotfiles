@@ -121,8 +121,13 @@ export function cascadeDockIcons(scope?: Gtk.Widget) {
 //   - The INPUT REGION is a pure function of the current state, re-derived
 //     both on every state change and by a slow reconciler tick, so a stale
 //     region can never outlive half a second.
-const HOLD_TICK_MS = 200
+const HOLD_TICK_MS = 100
 const RECONCILE_TICK_MS = 500
+// thin full-width band at the very bottom edge: traveling along the screen
+// edge (e.g. after summoning the dock from a corner) keeps the hold alive
+const EDGE_BAND_PX = 8
+// how far past the pill's sides the hold reaches before "left sideways"
+const SIDE_SLACK_PX = 24
 
 export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const [menuOpen, setMenuOpen] = createState(false)
@@ -134,9 +139,11 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     let selfRef: Astal.Window | null = null
     let dockBoxRef: Gtk.Widget | null = null
 
-    // is the cursor inside the bottom strip the dock (or the travel path
-    // from the edge sensor up to it) occupies? Asked straight from the
-    // compositor — cannot go stale, cannot miss a leave event.
+    // is the cursor inside the area that keeps the dock alive? That is the
+    // strip the pill occupies (its horizontal span only — leaving sideways
+    // hides just like leaving upward) plus a thin band along the bottom
+    // edge for travel. Asked straight from the compositor — cannot go
+    // stale, cannot miss a leave event.
     const cursorInStrip = (): boolean => {
         let reply: string
         try {
@@ -149,10 +156,23 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         const x = Number(m[1])
         const y = Number(m[2])
         const geo = gdkmonitor.get_geometry()
+        if (x < geo.x || x >= geo.x + geo.width) return false
+        const yFromBottom = geo.y + geo.height - y
+        if (yFromBottom <= 0) return false
+        if (yFromBottom <= EDGE_BAND_PX) return true
         const stripH = Math.max(selfRef?.get_height() ?? 0, 60)
-        return x >= geo.x && x < geo.x + geo.width
-            && y >= geo.y + geo.height - stripH
-            && y < geo.y + geo.height
+        if (yFromBottom > stripH) return false
+        // within dock height: only the pill's span counts (x is unaffected
+        // by the slide transform, so these bounds are safe mid-animation)
+        if (dockBoxRef && selfRef) {
+            const [ok, bounds] = dockBoxRef.compute_bounds(selfRef)
+            if (ok && bounds.get_width() > 0) {
+                const x0 = geo.x + bounds.get_x() - SIDE_SLACK_PX
+                const x1 = geo.x + bounds.get_x() + bounds.get_width() + SIDE_SLACK_PX
+                return x >= x0 && x < x1
+            }
+        }
+        return true // pill bounds unknown — fall back to the full strip
     }
 
     const poke = () => {

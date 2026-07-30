@@ -6,7 +6,7 @@ import Hyprland from "gi://AstalHyprland"
 import { classToEntry as _classToEntry, entryToClass as _entryToClass, mapVersion } from "../desktopEntries"
 import { entryForClient } from "../appIcon"
 
-export const DOCK_HIDE_TIMEOUT = 600
+export const DOCK_HIDE_TIMEOUT = 200
 export const JUMP_ANIMATION_CLASS_TIMEOUT = 500
 export const DOCK_SLIDE_DURATION = 400
 
