@@ -3,27 +3,25 @@
 }
 
 .desktop-icons {
-    padding: 10px;
     background: none;
+}
 
-    flowboxchild {
-        background: none;
-        border-radius: 12px;
-        padding: 4px;
+.desktop-item {
+    background: none;
+    border-radius: 12px;
+    padding: 4px;
 
-        &:hover {
-            background: rgba(255, 255, 255, 0.08);
-        }
+    &:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
 
-        &:selected {
-            background: rgba(255, 255, 255, 0.16);
-            box-shadow: none;
-        }
+    &.selected {
+        background: rgba(255, 255, 255, 0.16);
+    }
 
-        // folder icon currently hovered by a file drag
-        &.drop-hover {
-            background: rgba(255, 255, 255, 0.24);
-        }
+    // folder icon currently hovered by a file drag
+    &.drop-hover {
+        background: rgba(255, 255, 255, 0.24);
     }
 }
 

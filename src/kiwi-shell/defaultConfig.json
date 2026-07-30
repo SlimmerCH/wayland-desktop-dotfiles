@@ -10,6 +10,7 @@
   "dock_icon_size": 52,
   "dock_full_width": false,
   "desktop_icons": true,
+  "desktop_free_placement": false,
   "popup_monitor": "active",
   "dock_arpeggio": false,
   "indicator_bar_position": "bottom",
