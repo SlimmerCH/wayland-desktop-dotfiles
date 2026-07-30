@@ -8,6 +8,7 @@ import { CircularProgress } from "../../Misc"
 
 import SystemTab from "./tabs/SystemTab"
 import NetworkTab, { rescanWifi } from "./tabs/NetworkTab"
+import { setHardwarePolling } from "./tabs/hardwarePolling"
 import ThemeTab from "./tabs/ThemeTab"
 import PerformanceTab from "./tabs/PerformanceTab"
 
@@ -24,6 +25,7 @@ import {
   stopBluetoothDiscovery,
 } from "./tabs/BluetoothTab"
 import { exec, execAsync } from "ags/process"
+import GLib from "gi://GLib"
 
 const network = Network.get_default()
 const wifi = network.wifi
@@ -133,6 +135,7 @@ export default function SystemMenu() {
       $={(self) => (systemMenuPopover = self)}
       onShow={() => {
         setSystemMenuOpen(true)
+        setHardwarePolling(true)
         closeNc()
         if (activeTab.get() === 1) {
           rescanWifi()
@@ -145,6 +148,7 @@ export default function SystemMenu() {
       }}
       onClosed={() => {
         setSystemMenuOpen(false)
+        setHardwarePolling(false)
         try {
           stopBluetoothDiscovery()
         } catch {}
@@ -257,7 +261,9 @@ function batteryBarColor(percentage, isCharging, primaryColor) {
 }
 
 function Time() {
-  const time = createPoll("9:41", 1000, "date '+%H:%M'")
+  // formatted in-process — no `date` spawn every second
+  const time = createPoll("9:41", 1000, () =>
+    GLib.DateTime.new_now_local().format("%H:%M") ?? "")
   return (
     <box class="time">
       <label label={time} />

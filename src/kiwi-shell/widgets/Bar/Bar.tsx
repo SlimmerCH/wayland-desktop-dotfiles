@@ -5,6 +5,7 @@ import { createBinding, createComputed, onCleanup } from "ags"
 
 import Battery from "gi://AstalBattery"
 import Network from "gi://AstalNetwork"
+import GLib from "gi://GLib"
 
 import SystemMenu, { systemMenuOpen, closeSystemMenu } from "./SystemMenu/SystemMenu"
 import { closeNc } from "../Notifications/NotificationCenter"
@@ -122,7 +123,9 @@ function MenuButtons({ toggleNc, onToggleNcReady }: {
     toggleNc: () => void
     onToggleNcReady: (w: Gtk.Widget) => void
 }) {
-    const time = createPoll("", 1000, "date '+%a %b %d  %H:%M'")
+    // formatted in-process — no `date` spawn every second
+    const time = createPoll("", 1000, () =>
+        GLib.DateTime.new_now_local().format("%a %b %d  %H:%M") ?? "")
 
     return (
         <box class="MenuButtons">

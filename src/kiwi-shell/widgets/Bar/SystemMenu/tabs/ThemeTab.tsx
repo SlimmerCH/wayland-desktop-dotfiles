@@ -42,14 +42,21 @@ function setupWallpaperPolling() {
     
     if (!retryInterval) {
         logDebug("Starting wallpaper polling...")
+        // capped: without awww installed this would otherwise spawn two
+        // processes every 2s for the lifetime of the shell
+        let attempts = 0
         retryInterval = setInterval(() => {
             const path = getCurrentWallpaper()
             if (path) {
                 logDebug("Successfully connected to awww daemon")
                 storeWallpaperPath(path)
-                clearInterval(retryInterval!)
-                retryInterval = null
+            } else if (++attempts < 15) {
+                return
+            } else {
+                logDebug("Giving up on awww daemon")
             }
+            clearInterval(retryInterval!)
+            retryInterval = null
         }, 2000) as unknown as number
     }
 }

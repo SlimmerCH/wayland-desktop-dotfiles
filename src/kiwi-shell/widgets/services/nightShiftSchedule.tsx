@@ -86,7 +86,8 @@ export default function nightShiftService() {
     subscribeChanged(conf.as(c => c.nightshift_start), tick);
     subscribeChanged(conf.as(c => c.nightshift_end), tick);
 
-    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
+    // schedule boundaries are minute-granular; a 30s tick is plenty
+    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
         tick();
         return GLib.SOURCE_CONTINUE;
     });
