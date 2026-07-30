@@ -203,19 +203,37 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         return !hastiledWindow
     })
 
-    // The one and only place the input region is written. Idempotent —
-    // shown → clicks land on the dock pill only (everything beside it
-    // falls through), hidden → the whole window is click-through.
+    // The one and only place the input region is written. Idempotent.
+    // Invariant: shown ⇒ the region covers the pill. It narrows to the
+    // pill's bounds (so clicks beside it fall through) ONLY once the slide
+    // has settled and the bounds are sane — while sliding, or whenever the
+    // bounds look off (a transform mid-animation would place the region
+    // off-screen: the old "visible but unclickable" bug), the whole window
+    // takes input instead. A dead dock is impossible; the cost of every
+    // fallback is merely a briefly-wider click area.
+    let shownAt = 0
+    let lastShown = false
     const syncInputRegion = () => {
         const surface = selfRef?.get_surface()
         if (!surface) return
-        if (!showDock()) {
+        const shown = showDock()
+        if (shown && !lastShown) shownAt = GLib.get_monotonic_time()
+        lastShown = shown
+
+        if (!shown) {
             surface.set_input_region(new Cairo.Region())
             return
         }
-        if (dockBoxRef) {
-            const [ok, bounds] = dockBoxRef.compute_bounds(selfRef!)
-            if (ok && bounds.get_width() > 0) {
+        const settled = GLib.get_monotonic_time() - shownAt
+            > (DOCK_SLIDE_DURATION + 150) * 1000
+        if (settled && dockBoxRef && selfRef) {
+            const [ok, bounds] = dockBoxRef.compute_bounds(selfRef)
+            const sane = ok
+                && bounds.get_width() > 0
+                && bounds.get_y() >= -2
+                && bounds.get_y() + bounds.get_height()
+                    <= selfRef.get_height() + 2
+            if (sane) {
                 const rect = new Cairo.RectangleInt()
                 rect.x = Math.floor(bounds.get_x())
                 rect.y = Math.floor(bounds.get_y())
@@ -227,8 +245,6 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 return
             }
         }
-        // not allocated yet — whole window for now, the reconciler narrows
-        // it as soon as bounds exist
         surface.set_input_region(null)
     }
 
@@ -241,6 +257,7 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 --jumptime: ${JUMP_ANIMATION_CLASS_TIMEOUT}ms;
                 --icon-size: ${conf.dock_icon_size}px;
                 --dock-slide-duration: ${DOCK_SLIDE_DURATION}ms;
+                --dock-slide-distance: ${conf.dock_icon_size + 68}px;
                 `
             )}
             name="ags-dock"

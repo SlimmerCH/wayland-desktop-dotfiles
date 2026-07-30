@@ -14,9 +14,11 @@
     transition: transform var(--dock-slide-duration);
 
     &.slide-out {
-        // must exceed any possible dock height (icon size + paddings +
-        // shadow), or the slide ends with a sliver still visible
-        transform: translateY(160px);
+        // distance comes from JS (icon size + chrome) so it always exceeds
+        // the dock height without a sliver, at any icon size; the longer
+        // hide duration keeps the exit at the same px/ms speed as the entry
+        transform: translateY(var(--dock-slide-distance));
+        transition-duration: 600ms;
     }
 
 }
