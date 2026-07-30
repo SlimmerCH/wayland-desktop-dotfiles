@@ -186,7 +186,9 @@ function uniqueDest(name: string, dirPath = DESKTOP_DIR): Gio.File {
     }
 }
 
-function pasteUris(uris: string[], cut: boolean, destDir = DESKTOP_DIR) {
+// returns the paths the files will land on
+function pasteUris(uris: string[], cut: boolean, destDir = DESKTOP_DIR): string[] {
+    const created: string[] = []
     for (const uri of uris) {
         const src = Gio.File.new_for_uri(uri)
         const srcPath = src.get_path()
@@ -204,10 +206,12 @@ function pasteUris(uris: string[], cut: boolean, destDir = DESKTOP_DIR) {
             : ["cp", "-r", "--", srcPath, dest.get_path()!]
         try {
             Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE)
+            created.push(dest.get_path()!)
         } catch (e) {
             console.error(`Desktop: failed to paste ${srcPath}:`, e)
         }
     }
+    return created
 }
 
 function pasteFromClipboard() {
@@ -281,8 +285,37 @@ let monW = 1920
 let monH = 1080
 
 const freePlacement = () => !!conf.get().desktop_free_placement
+
+let monitorRef: Gdk.Monitor | null = null
+
+// the desktop surface ignores exclusive zones (so the rubber band reaches
+// the screen edges), so the grid itself must dodge the bar and the dock:
+// sum the heights of visible EXCLUSIVE top-/bottom-anchored shell windows
+function reservedInsets(): { top: number; bottom: number } {
+    let top = 0
+    let bottom = 0
+    for (const win of app.get_windows()) {
+        if (!(win instanceof Astal.Window)) continue
+        if (!win.visible || win.exclusivity !== Astal.Exclusivity.EXCLUSIVE)
+            continue
+        if (monitorRef && win.gdkmonitor && win.gdkmonitor !== monitorRef)
+            continue
+        const h = win.get_height()
+        if (h <= 1) continue
+        const atTop = !!(win.anchor & Astal.WindowAnchor.TOP)
+        const atBottom = !!(win.anchor & Astal.WindowAnchor.BOTTOM)
+        if (atTop && !atBottom) top = Math.max(top, h)
+        else if (atBottom && !atTop) bottom = Math.max(bottom, h)
+    }
+    return { top, bottom }
+}
+
 const gridCols = () => Math.max(1, Math.floor((monW - GRID_MARGIN * 2) / CELL_W))
-const gridRows = () => Math.max(1, Math.floor((monH - GRID_MARGIN * 2) / CELL_H))
+const gridRows = () => {
+    const { top, bottom } = reservedInsets()
+    return Math.max(1,
+        Math.floor((monH - top - bottom - GRID_MARGIN * 2) / CELL_H))
+}
 
 const slotKey = (s: Slot) => `${s.col},${s.row}`
 
@@ -291,12 +324,16 @@ function slotAt(x: number, y: number): Slot {
         col: Math.min(gridCols() - 1,
             Math.max(0, Math.floor((x - GRID_MARGIN) / CELL_W))),
         row: Math.min(gridRows() - 1,
-            Math.max(0, Math.floor((y - GRID_MARGIN) / CELL_H))),
+            Math.max(0, Math.floor(
+                (y - GRID_MARGIN - reservedInsets().top) / CELL_H))),
     }
 }
 
 function slotPixels(s: Slot): [number, number] {
-    return [GRID_MARGIN + s.col * CELL_W, GRID_MARGIN + s.row * CELL_H]
+    return [
+        GRID_MARGIN + s.col * CELL_W,
+        GRID_MARGIN + reservedInsets().top + s.row * CELL_H,
+    ]
 }
 
 // row-major scan for the first slot not in `occupied` (runs past the
@@ -329,6 +366,30 @@ function saveLayout() {
             .catch((e) => console.error("Desktop: failed to save layout:", e))
         return GLib.SOURCE_REMOVE
     })
+}
+
+// slots promised to files that are still being copied in: relayout must
+// not prune them before the file shows up (15s grace)
+const seededAt = new Map<string, number>()
+
+function nextSlot(s: Slot): Slot {
+    return s.col + 1 < gridCols()
+        ? { col: s.col + 1, row: s.row }
+        : { col: 0, row: s.row + 1 }
+}
+
+// external drops land where they were dropped: pre-assign grid slots to
+// the incoming paths; relayout honors them once the files appear
+function seedSlots(paths: string[], x: number, y: number) {
+    const occupied = new Set([...layout.values()].map(slotKey))
+    let slot = slotAt(x, y)
+    for (const p of paths) {
+        while (occupied.has(slotKey(slot))) slot = nextSlot(slot)
+        layout.set(p, slot)
+        seededAt.set(p, GLib.get_monotonic_time())
+        occupied.add(slotKey(slot))
+    }
+    saveLayout()
 }
 
 function relayout() {
@@ -367,9 +428,19 @@ function relayout() {
 
     // free placement: persisted slots; new files take the first free one
     let changed = false
-    for (const path of [...layout.keys()])
-        if (!byPath.has(path)) { layout.delete(path); changed = true }
+    for (const path of [...layout.keys()]) {
+        if (byPath.has(path)) { seededAt.delete(path); continue }
+        const seeded = seededAt.get(path)
+        if (seeded !== undefined
+            && GLib.get_monotonic_time() - seeded < 15_000_000) continue
+        layout.delete(path)
+        seededAt.delete(path)
+        changed = true
+    }
     const occupied = new Set<string>()
+    // slots promised to in-flight drops count as taken
+    for (const [path, s] of layout)
+        if (!byPath.has(path)) occupied.add(slotKey(s))
     for (const item of list) {
         let slot = layout.get(item.path)
         if (slot && (slot.col >= gridCols() || occupied.has(slotKey(slot))))
@@ -387,13 +458,8 @@ function relayout() {
 }
 
 items.subscribe(relayout)
-
-let lastFreePlacement = freePlacement()
-conf.subscribe(() => {
-    if (freePlacement() === lastFreePlacement) return
-    lastFreePlacement = freePlacement()
-    relayout()
-})
+// placement mode, dock mode (exclusive zone!) etc. all live in the config
+conf.subscribe(relayout)
 
 selected.subscribe(() => {
     const sel = selected.get()
@@ -413,12 +479,19 @@ function preferredDropAction(target: Gtk.DropTarget): Gdk.DragAction {
     return actions & Gdk.DragAction.MOVE ? Gdk.DragAction.MOVE : Gdk.DragAction.COPY
 }
 
-function handleFileDrop(value: Gdk.FileList, move: boolean, destDir = DESKTOP_DIR): boolean {
+function handleFileDrop(
+    value: Gdk.FileList,
+    move: boolean,
+    destDir = DESKTOP_DIR,
+    dropAt?: { x: number; y: number },
+): boolean {
     const uris = value.get_files().map((f: Gio.File) => f.get_uri())
     if (uris.length === 0) return false
     logDebug(`[Desktop] drop ${uris.length} uri(s) (${move ? "move" : "copy"}) → ${destDir}`)
-    pasteUris(uris, move, destDir)
-    return true
+    const created = pasteUris(uris, move, destDir)
+    if (dropAt && destDir === DESKTOP_DIR && freePlacement())
+        seedSlots(created, dropAt.x, dropAt.y)
+    return created.length > 0
 }
 
 // the icon the current internal drag was grabbed by — anchors the offset
@@ -659,6 +732,7 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
     const geometry = gdkmonitor.get_geometry()
     monW = geometry.width
     monH = geometry.height
+    monitorRef = gdkmonitor
 
     let pasteBtn: Gtk.Button
 
@@ -696,7 +770,10 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             name="ags-desktop"
             class={conf.as((conf: any) => `Desktop theme-${conf.theme}`)}
             gdkmonitor={gdkmonitor}
-            exclusivity={Astal.Exclusivity.NORMAL}
+            // IGNORE: cover the full monitor (under bar and dock) so the
+            // rubber band isn't clipped at the exclusive zones; the icon
+            // grid dodges those areas itself via reservedInsets()
+            exclusivity={Astal.Exclusivity.IGNORE}
             anchor={Astal.WindowAnchor.TOP | Astal.WindowAnchor.BOTTOM | Astal.WindowAnchor.LEFT | Astal.WindowAnchor.RIGHT}
             application={app}
             layer={Astal.Layer.BOTTOM}
@@ -881,7 +958,7 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                             return repositionDragged(uris, x, y)
                         }
                         const move = preferredDropAction(drop) === Gdk.DragAction.MOVE
-                        return handleFileDrop(value, move)
+                        return handleFileDrop(value, move, DESKTOP_DIR, { x, y })
                     })
                     self.add_controller(drop)
                 }}
@@ -906,6 +983,13 @@ export default function Desktop({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 $={(self) => {
                     fixedRef = self
                     relayout()
+                    // bar/dock may not be allocated yet on the first pass —
+                    // their exclusive-zone heights read 0 and icons would
+                    // hide beneath them; lay out again once settled
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+                        relayout()
+                        return GLib.SOURCE_REMOVE
+                    })
                 }}
             />
             </overlay>

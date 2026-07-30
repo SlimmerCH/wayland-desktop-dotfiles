@@ -2,6 +2,16 @@
     background: none;
 }
 
+// GTK paints an accent-colored highlight on the widget under an active
+// drop — the whole desktop lighting up on every file drag is noise; the
+// folder .drop-hover class is the only wanted feedback
+.Desktop :drop(active),
+.Desktop:drop(active) {
+    outline: none;
+    box-shadow: none;
+    caret-color: transparent;
+}
+
 .desktop-icons {
     background: none;
 }
