@@ -3,7 +3,7 @@ import App from "ags/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createBinding, onCleanup } from "ags"
 import { conf } from "../config"
-import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, DOCK_HIDE_TIMEOUT_EDGE, JUMP_ANIMATION_CLASS_TIMEOUT, DOCK_SLIDE_DURATION } from "./dock-state"
+import { hyprland, list, unpinnedList, DOCK_HIDE_TIMEOUT, JUMP_ANIMATION_CLASS_TIMEOUT, DOCK_SLIDE_DURATION } from "./dock-state"
 import { AppIcon } from "./AppIcon"
 import { HomeFolderButton, TrashButton } from "./DockButtons"
 import { KeyedList } from "../KeyedList"
@@ -108,15 +108,77 @@ export function cascadeDockIcons(scope?: Gtk.Widget) {
 
 // ─── Dock ─────────────────────────────────────────────────────────────────────
 
+// Auto-hide is built so stuck states are structurally impossible:
+//
+//   - SHOWING is event-driven: the edge sensor (and the dock itself) "poke"
+//     the hold. A missed event means the dock shows a moment later on the
+//     next motion event — never stuck hidden.
+//   - STAYING SHOWN needs continuously re-proven evidence: while held, a
+//     watchdog polls the real cursor position (hyprland IPC) and drops the
+//     hold once the cursor has verifiably left the dock strip. No enter/
+//     leave pairs, no one-shot hide timers to lose — if the evidence stops,
+//     the dock hides, full stop.
+//   - The INPUT REGION is a pure function of the current state, re-derived
+//     both on every state change and by a slow reconciler tick, so a stale
+//     region can never outlive half a second.
+const HOLD_TICK_MS = 200
+const RECONCILE_TICK_MS = 500
+
 export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
-    const [dockTrigger, setDockTrigger] = createState(false)
-    const [dockHovered, setDockHovered] = createState(false)
     const [menuOpen, setMenuOpen] = createState(false)
-    let leaveTimeout: number | null = null
+    // the dead-man hold: poke() switches it on, only the watchdog switches
+    // it off
+    const [held, setHeld] = createState(false)
+    let lastEvidence = 0 // monotonic µs of the last proof the cursor is here
+    let watchdogId: number | null = null
     let selfRef: Astal.Window | null = null
     let dockBoxRef: Gtk.Widget | null = null
-    let regionGen = 0
-    let modeTransitioning = false
+
+    // is the cursor inside the bottom strip the dock (or the travel path
+    // from the edge sensor up to it) occupies? Asked straight from the
+    // compositor — cannot go stale, cannot miss a leave event.
+    const cursorInStrip = (): boolean => {
+        let reply: string
+        try {
+            reply = hyprland.message("cursorpos")
+        } catch {
+            return false // IPC down → evidence lapses → dock hides
+        }
+        const m = reply.match(/(-?\d+),\s*(-?\d+)/)
+        if (!m) return false
+        const x = Number(m[1])
+        const y = Number(m[2])
+        const geo = gdkmonitor.get_geometry()
+        const stripH = Math.max(selfRef?.get_height() ?? 0, 60)
+        return x >= geo.x && x < geo.x + geo.width
+            && y >= geo.y + geo.height - stripH
+            && y < geo.y + geo.height
+    }
+
+    const poke = () => {
+        if (conf().dock !== "auto-hide") return
+        lastEvidence = GLib.get_monotonic_time()
+        setHeld(true)
+        if (watchdogId !== null) return
+        watchdogId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOLD_TICK_MS, () => {
+            if (conf().dock !== "auto-hide") {
+                watchdogId = null
+                setHeld(false)
+                return GLib.SOURCE_REMOVE
+            }
+            // an open context menu counts as presence (it usually extends
+            // above the strip)
+            if (cursorInStrip() || menuOpen())
+                lastEvidence = GLib.get_monotonic_time()
+            if (GLib.get_monotonic_time() - lastEvidence
+                > DOCK_HIDE_TIMEOUT * 1000) {
+                watchdogId = null
+                setHeld(false)
+                return GLib.SOURCE_REMOVE
+            }
+            return GLib.SOURCE_CONTINUE
+        })
+    }
 
     const showDock = createComputed(get => {
         const config = get(conf)
@@ -124,13 +186,9 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
             return false
 
         const mode = config.dock
-        const trigger = get(dockTrigger)
-        const hovered = get(dockHovered)
-        const hasMenu = get(menuOpen)
-
         if (mode == "disabled") return false
         if (mode != "auto-hide") return true
-        if (trigger || hovered || hasMenu) return true
+        if (get(held) || get(menuOpen)) return true
 
         get(activeWorkspace)
 
@@ -145,49 +203,33 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
         return !hastiledWindow
     })
 
-    // Sets input region to just the dock box bounds.
-    const setNarrowRegion = () => {
-        if (!selfRef || !dockBoxRef) return
-        const surface = selfRef.get_surface()
-        if (!surface) return
-        const [ok, bounds] = dockBoxRef.compute_bounds(selfRef)
-        if (!ok || bounds.get_width() <= 0) return
-        const rect = new Cairo.RectangleInt()
-        rect.x = Math.floor(bounds.get_x())
-        rect.y = Math.floor(bounds.get_y())
-        rect.width = Math.ceil(bounds.get_width())
-        rect.height = Math.ceil(bounds.get_height())
-        const region = new Cairo.Region()
-        region.unionRectangle(rect)
-        surface.set_input_region(region)
-    }
-
-    // Applies the region for the *current* state:
-    // - hidden → empty region (full click-through)
-    // - showing in auto-hide with travel → full window so cursor can travel up to dock
-    // - otherwise showing → narrow region (dock box only)
-    const applyRegion = (travel = false) => {
-        if (!selfRef) return
-        const surface = selfRef.get_surface()
+    // The one and only place the input region is written. Idempotent —
+    // shown → clicks land on the dock pill only (everything beside it
+    // falls through), hidden → the whole window is click-through.
+    const syncInputRegion = () => {
+        const surface = selfRef?.get_surface()
         if (!surface) return
         if (!showDock()) {
             surface.set_input_region(new Cairo.Region())
-        } else if (travel && conf().dock === "auto-hide") {
-            surface.set_input_region(null)
-        } else {
-            setNarrowRegion()
+            return
         }
-    }
-
-    // Re-applies the region once the slide/reflow animation has settled. The
-    // generation counter voids the pending callback whenever a newer region
-    // change happens, so a stale timeout can never stamp a ghost region onto a
-    // hidden dock (which used to freeze it).
-    const applyRegionSettled = (delay = DOCK_SLIDE_DURATION + 50) => {
-        const gen = ++regionGen
-        setTimeout(() => {
-            if (gen === regionGen && !modeTransitioning) applyRegion()
-        }, delay)
+        if (dockBoxRef) {
+            const [ok, bounds] = dockBoxRef.compute_bounds(selfRef!)
+            if (ok && bounds.get_width() > 0) {
+                const rect = new Cairo.RectangleInt()
+                rect.x = Math.floor(bounds.get_x())
+                rect.y = Math.floor(bounds.get_y())
+                rect.width = Math.ceil(bounds.get_width())
+                rect.height = Math.ceil(bounds.get_height())
+                const region = new Cairo.Region()
+                region.unionRectangle(rect)
+                surface.set_input_region(region)
+                return
+            }
+        }
+        // not allocated yet — whole window for now, the reconciler narrows
+        // it as soon as bounds exist
+        surface.set_input_region(null)
     }
 
     return [(
@@ -217,117 +259,57 @@ export default function Dock({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
                 selfRef = self
                 onCleanup(() => self.destroy())
 
+                // any pointer or drag activity on the dock is presence
+                // evidence — no leave handling, the watchdog notices absence
                 const motionController = new Gtk.EventControllerMotion()
-                motionController.connect("motion", (_controller, x, y) => {
-                    if (!dockBoxRef) return
-                    const [ok, bounds] = dockBoxRef.compute_bounds(self)
-                    if (!ok) return
-                    const inBounds =
-                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
-                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
-                    if (inBounds) {
-                        if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
-                        setDockHovered(true)
-                    }
-                })
-                motionController.connect("leave", () => {
-                    applyRegion()
-                    leaveTimeout = setTimeout(() => {
-                        setDockHovered(false)
-                        leaveTimeout = null
-                    }, DOCK_HIDE_TIMEOUT)
-                })
+                motionController.connect("enter", poke)
+                motionController.connect("motion", poke)
                 self.add_controller(motionController)
 
                 const dragMotion = new Gtk.DropControllerMotion()
-                dragMotion.connect("motion", (_controller, x, y) => {
-                    if (!dockBoxRef) return
-                    const [ok, bounds] = dockBoxRef.compute_bounds(self)
-                    if (!ok) return
-                    const inBounds =
-                        x >= bounds.get_x() && x <= bounds.get_x() + bounds.get_width() &&
-                        y >= bounds.get_y() && y <= bounds.get_y() + bounds.get_height()
-                    if (inBounds) {
-                        if (leaveTimeout) { clearTimeout(leaveTimeout); leaveTimeout = null }
-                        setDockHovered(true)
-                    }
-                })
-                dragMotion.connect("leave", () => {
-                    applyRegion()
-                    leaveTimeout = setTimeout(() => {
-                        setDockHovered(false)
-                        leaveTimeout = null
-                    }, DOCK_HIDE_TIMEOUT)
-                })
+                dragMotion.connect("enter", poke)
+                dragMotion.connect("motion", poke)
                 self.add_controller(dragMotion)
 
-                showDock.subscribe(() => {
-                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        if (!modeTransitioning) {
-                            applyRegion(true)
-                            applyRegionSettled()
-                        }
-                        return GLib.SOURCE_REMOVE
+                // immediate region updates on state changes…
+                showDock.subscribe(syncInputRegion)
+                conf.subscribe(syncInputRegion)
+                lengths.subscribe(syncInputRegion)
+                self.connect("map", syncInputRegion)
+                // …and the reconciler: even if every one of those missed
+                // (icon reflow moved the pill, an animation raced the
+                // bounds), the region self-heals within half a second
+                const reconcileId = GLib.timeout_add(
+                    GLib.PRIORITY_DEFAULT, RECONCILE_TICK_MS, () => {
+                        syncInputRegion()
+                        return GLib.SOURCE_CONTINUE
                     })
-                })
-
-                let prevMode = conf().dock
-                conf.subscribe(() => {
-                    const mode = conf().dock
-                    if (mode === prevMode) return
-                    prevMode = mode
-                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        modeTransitioning = true
-                        regionGen++
-                        const surface = selfRef?.get_surface()
-                        if (surface) surface.set_input_region(null)
-                        setTimeout(() => {
-                            modeTransitioning = false
-                            regionGen++
-                            applyRegion()
-                        }, DOCK_SLIDE_DURATION)
-                        return GLib.SOURCE_REMOVE
-                    })
-                })
-
-                lengths.subscribe(() => {
-                    GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                        if (!modeTransitioning) {
-                            applyRegion()
-                            // icon add/remove reflow animations run for ~650ms
-                            applyRegionSettled(700)
-                        }
-                        return GLib.SOURCE_REMOVE
-                    })
+                onCleanup(() => {
+                    GLib.source_remove(reconcileId)
+                    if (watchdogId !== null) {
+                        GLib.source_remove(watchdogId)
+                        watchdogId = null
+                    }
                 })
             }}
         >
             <DockBar
                 setMenuOpen={setMenuOpen}
                 showDock={showDock}
-                onDockBoxReady={(widget) => {
-                    dockBoxRef = widget
-                    let signalId: number | null = widget.connect("notify::width", () => {
-                        if (widget.get_width() > 0) {
-                            if (signalId !== null) {
-                                widget.disconnect(signalId)
-                                signalId = null
-                            }
-                            applyRegion()
-                            applyRegionSettled()
-                        }
-                    })
-                }}
+                onDockBoxReady={(widget) => { dockBoxRef = widget }}
             />
         </window>
-    ), <EdgeSensor gdkmonitor={gdkmonitor} setDockTrigger={setDockTrigger} />]
+    ), <EdgeSensor gdkmonitor={gdkmonitor} poke={poke} />]
 }
 
 // ─── EdgeSensor ───────────────────────────────────────────────────────────────
 
-function EdgeSensor({ gdkmonitor, setDockTrigger }: {
+// Stateless: touching the bottom edge pokes the dock's hold, nothing else.
+// It carries no timers and no state of its own, so it has nothing to get
+// stuck on — hiding is entirely the watchdog's job.
+function EdgeSensor({ gdkmonitor, poke }: {
     gdkmonitor: Gdk.Monitor,
-    setDockTrigger: (v: boolean) => void,
+    poke: () => void,
 }) {
     return (
         <window
@@ -341,32 +323,15 @@ function EdgeSensor({ gdkmonitor, setDockTrigger }: {
             visible={conf.as(conf => conf.dock == "auto-hide")}
             $={(self) => {
                 onCleanup(() => self.destroy())
-                let triggerTimeout: number | null = null
 
                 const motionController = new Gtk.EventControllerMotion()
-                motionController.connect("enter", () => {
-                    if (triggerTimeout) { clearTimeout(triggerTimeout); triggerTimeout = null }
-                    setDockTrigger(true)
-                })
-                motionController.connect("leave", () => {
-                    triggerTimeout = setTimeout(() => {
-                        setDockTrigger(false)
-                        triggerTimeout = null
-                    }, DOCK_HIDE_TIMEOUT_EDGE)
-                })
+                motionController.connect("enter", poke)
+                motionController.connect("motion", poke)
                 self.add_controller(motionController)
 
                 const dragMotion = new Gtk.DropControllerMotion()
-                dragMotion.connect("enter", () => {
-                    if (triggerTimeout) { clearTimeout(triggerTimeout); triggerTimeout = null }
-                    setDockTrigger(true)
-                })
-                dragMotion.connect("leave", () => {
-                    triggerTimeout = setTimeout(() => {
-                        setDockTrigger(false)
-                        triggerTimeout = null
-                    }, DOCK_HIDE_TIMEOUT_EDGE)
-                })
+                dragMotion.connect("enter", poke)
+                dragMotion.connect("motion", poke)
                 self.add_controller(dragMotion)
             }}
         >
