@@ -1,20 +1,18 @@
 # Kiwi Shell
 
-A clean, macOS-inspired desktop shell for **Hyprland** — featuring a status bar, app switcher, application dock, media player and quick settings panel.
+A macOS-inspired desktop shell for **Hyprland**: status bar, dock, app
+switcher, workspace switcher, app launcher, notification center, desktop
+icons and a quick settings panel.
 
 ![Screenshot](./docs/screenshots/screenshot3.png)
 
 More screenshots [here](./docs/screenshots/screenshots.md).
 
----
+Built on [Astal](https://github.com/aylur/astal), so it reacts to compositor
+and system events instead of polling. Configured through config files or the
+[kiwi-settings](https://github.com/selimbucher/kiwi-settings) app.
 
-## Why Kiwi Shell?
-- Kiwi Shell focuses on a polished, professional aesthetic inspired by macOS.
-- Kiwi Shell is easy to install — one command on Arch, a few lines in your flake on NixOS.
-- Kiwi Shell is designed to be configurable. It comes with its own [settings](https://github.com/selimbucher/kiwi-settings) app and supports config files.
-- Kiwi Shell is lightweight by design. Built on [Astal](https://github.com/aylur/astal), it reacts to system changes instead of polling for them, keeping CPU usage low and the interface snappy.
-
-If you run into any problems, I am happy to help. Just open an issue on github.
+If you run into any problems, open an issue on GitHub.
 
 ---
 
