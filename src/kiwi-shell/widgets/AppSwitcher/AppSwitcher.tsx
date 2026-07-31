@@ -5,7 +5,7 @@ import { execAsync } from "ags/process"
 import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
 import { playSound } from "../sound"
-import { captureWindowToTexture } from "./clientCachingService"
+import { captureWindowToTexture, getCachedTexture } from "./clientCachingService"
 import { isValidClient, isMinimized, restoreClient, focusClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 import { popupGdkMonitor } from "../monitors"
@@ -191,14 +191,20 @@ export default function AppSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Monitor })
 
 const PREVIEW_HEIGHT = 220
 
-// card width from the window's own geometry: known synchronously, and the
-// screenshot shares the window's aspect ratio anyway
-function previewWidth(client: any): number {
-    const w = client.get_width()
-    const h = client.get_height()
+function aspectWidth(w: number, h: number): number {
     return h > 0
         ? Math.min(520, Math.max(120, Math.round(PREVIEW_HEIGHT * w / h)))
         : 260
+}
+
+// card width from the latest snapshot when one exists — its pixel size is the
+// window's true size at capture, while Astal client geometry can be stale.
+// Client geometry is only the fallback for windows never captured.
+function previewWidth(client: any): number {
+    const cached = getCachedTexture(client.get_address())
+    return cached
+        ? aspectWidth(cached.get_width(), cached.get_height())
+        : aspectWidth(client.get_width(), client.get_height())
 }
 
 function Windows({ gdkmonitor }: { gdkmonitor: Gdk.Monitor }) {
@@ -286,7 +292,9 @@ export function WindowPreview({ client }: { client: any }) {
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
                 heightRequest={PREVIEW_HEIGHT}
-                widthRequest={previewWidth(client)}
+                widthRequest={texture(t =>
+                    t ? aspectWidth(t.get_width(), t.get_height())
+                      : previewWidth(client))}
             >
                 <Gtk.Picture
                     canShrink={true}

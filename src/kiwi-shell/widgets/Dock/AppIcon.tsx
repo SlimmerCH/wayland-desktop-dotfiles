@@ -289,9 +289,15 @@ function WindowPreviewItem({ client, pickerOpen, popdown }: {
                 hscrollbarPolicy={Gtk.PolicyType.NEVER}
                 vscrollbarPolicy={Gtk.PolicyType.NEVER}
                 heightRequest={112}
-                widthRequest={client.get_height() > 0
-                    ? Math.min(300, Math.max(120, Math.round(112 * client.get_width() / client.get_height())))
-                    : 192}
+                widthRequest={texture(t => {
+                    // snapshot pixel size over Astal geometry: the latter is
+                    // stale after resizes (Hyprland emits no resize event)
+                    const w = t ? t.get_width() : client.get_width()
+                    const h = t ? t.get_height() : client.get_height()
+                    return h > 0
+                        ? Math.min(300, Math.max(120, Math.round(112 * w / h)))
+                        : 192
+                })}
             >
                 <Gtk.Picture
                     canShrink={true}

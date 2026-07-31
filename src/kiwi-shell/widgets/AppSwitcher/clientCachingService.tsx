@@ -156,6 +156,13 @@ hyprland.connect("notify::clients", () => {
 })
 
 // ─── Public API ────────────────────────────────────────────────────────────────
+// Latest cached snapshot, if any — synchronous, never triggers a capture.
+// Sizing code prefers this over Astal client geometry, which goes stale after
+// resizes (Hyprland emits no resize event, so sync_clients() never runs).
+export function getCachedTexture(address: string): Gdk.Texture | null {
+    return cache.get(address)?.texture ?? null
+}
+
 // Returns the cached texture immediately if fresh enough.
 // Falls back to a live capture for stale or missing entries.
 // The AppSwitcher calls this per-window when it opens.
