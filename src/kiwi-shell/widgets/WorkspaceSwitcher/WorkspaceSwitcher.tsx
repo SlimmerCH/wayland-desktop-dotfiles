@@ -156,7 +156,7 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
                     halign={Gtk.Align.CENTER}
                 >
                     <For each={displayedIds}>
-                        {(id) => <WorkspaceCard id={id} gdkmonitor={gdkmonitor} />}
+                        {(id) => <WorkspaceCard id={id} />}
                     </For>
                 </box>
             </centerbox>
@@ -164,10 +164,29 @@ export default function WorkspaceSwitcher({ gdkmonitor }: { gdkmonitor: Gdk.Moni
     )
 }
 
+// A workspace's own monitor in Hyprland layout terms: logical size (physical
+// divided by scale, dimensions swapped on rotated transforms) plus the layout
+// offset. Client coordinates are global layout coordinates, so miniatures must
+// subtract the offset and scale by the logical size — the popup's monitor is
+// the wrong frame of reference for workspaces living on another screen.
+// Workspaces that don't exist yet fall back to the focused monitor.
+function workspaceGeometry(id: number) {
+    const mon = hyprland.get_workspace(id)?.get_monitor()
+        ?? hyprland.get_focused_monitor()
+    const rotated = mon.get_transform() % 2 === 1
+    const scale = mon.get_scale() || 1
+    return {
+        x: mon.get_x(),
+        y: mon.get_y(),
+        width: (rotated ? mon.get_height() : mon.get_width()) / scale,
+        height: (rotated ? mon.get_width() : mon.get_height()) / scale,
+    }
+}
+
 // A capture-free workspace preview: a miniature of the workspace's window
 // layout, built from live client geometry, one rounded rect + app icon per
 // window.
-function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor }) {
+function WorkspaceCard({ id }: { id: number }) {
     // geometry is read per open inside the effect below — the popup can
     // land on a different monitor each time
     const [width, setWidth] = createState(Math.round(CARD_HEIGHT * 16 / 9))
@@ -194,7 +213,7 @@ function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor
                     $={(self: Gtk.Fixed) => {
                         createEffect(() => {
                             if (!isVisible()) return
-                            const geo = (popupGdkMonitor() ?? gdkmonitor).get_geometry()
+                            const geo = workspaceGeometry(id)
                             const cardWidth = Math.round(CARD_HEIGHT * geo.width / geo.height)
                             setWidth(cardWidth)
                             const clients = wsClients().get(id) ?? []
@@ -228,8 +247,8 @@ function WorkspaceCard({ id, gdkmonitor }: { id: number, gdkmonitor: Gdk.Monitor
                                             </box>
                                         </overlay>
                                     ) as Gtk.Widget,
-                                    Math.round(c.get_x() * cardWidth / geo.width),
-                                    Math.round(c.get_y() * CARD_HEIGHT / geo.height),
+                                    Math.round((c.get_x() - geo.x) * cardWidth / geo.width),
+                                    Math.round((c.get_y() - geo.y) * CARD_HEIGHT / geo.height),
                                 )
                             }
                         })
