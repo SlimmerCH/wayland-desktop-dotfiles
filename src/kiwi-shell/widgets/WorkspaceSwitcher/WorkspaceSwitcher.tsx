@@ -254,10 +254,13 @@ function WorkspaceCard({ id }: { id: number }) {
                         })
                     }}
                 />
-                <label
+                {/* a theme icon, not a "＋" label: the fullwidth plus glyph
+                    only exists in CJK fonts and renders as tofu without one */}
+                <Gtk.Image
                     $type="overlay"
                     class="ws-plus"
-                    label="＋"
+                    iconName="list-add-symbolic"
+                    pixelSize={24}
                     visible={empty}
                     halign={Gtk.Align.CENTER}
                     valign={Gtk.Align.CENTER}
