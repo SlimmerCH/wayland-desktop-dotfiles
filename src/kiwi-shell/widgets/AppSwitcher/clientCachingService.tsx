@@ -129,6 +129,50 @@ setInterval(() => {
     captureNow(lastFocusedAddress)
 }, FOCUSED_POLL_INTERVAL_MS)
 
+// ─── Proactive capture: resize end ────────────────────────────────────────────
+// Hyprland emits no IPC event for window resizes, so sizes are polled over the
+// raw socket (no process spawn, sub-ms round trip). A size that changed and
+// then held still for one tick means the resize is done → recapture. Covers
+// interactive resizes, resizeactive, and tiling reflows alike.
+const RESIZE_POLL_INTERVAL_MS = 600
+
+const lastSizes = new Map<string, string>()
+const settling = new Set<string>()
+
+setInterval(() => {
+    hyprland.message_async("j/clients", (_src: any, res: any) => {
+        let clients: any[]
+        try {
+            clients = JSON.parse(hyprland.message_finish(res))
+        } catch {
+            return
+        }
+        const seen = new Set<string>()
+        for (const c of clients) {
+            // Astal strips the 0x prefix from addresses; cache keys follow it
+            const addr = String(c.address ?? "").replace("0x", "")
+            if (!addr || !c.mapped) continue
+            seen.add(addr)
+            const size = `${c.size?.[0]}x${c.size?.[1]}`
+            const prev = lastSizes.get(addr)
+            lastSizes.set(addr, size)
+            if (prev === undefined) continue
+            if (size !== prev) {
+                settling.add(addr)
+            } else if (settling.has(addr)) {
+                settling.delete(addr)
+                captureNow(addr)
+            }
+        }
+        for (const addr of [...lastSizes.keys()]) {
+            if (!seen.has(addr)) {
+                lastSizes.delete(addr)
+                settling.delete(addr)
+            }
+        }
+    })
+}, RESIZE_POLL_INTERVAL_MS)
+
 // ─── Proactive capture: on new window ─────────────────────────────────────────
 // Capture newly opened windows after a short delay so they have time to
 // render. Also evict cache entries for windows that have closed.
