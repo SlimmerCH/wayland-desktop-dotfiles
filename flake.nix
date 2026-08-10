@@ -152,16 +152,26 @@
             --prefix LD_LIBRARY_PATH : "${app-capture}/lib" \
             --prefix LD_LIBRARY_PATH : "${hyprland-shortcuts}/lib"
 
-          # Logging Wrapper
+          # Start Wrapper: argv/instance guards, log rotation, tee to the log
           cat << 'EOF' > $out/bin/${pname}
           #!/usr/bin/env bash
+          if [ "$#" -gt 0 ]; then
+            echo "kiwi takes no arguments — use kiwictl to control the shell (kiwictl --help)" >&2
+            exit 2
+          fi
+          if GDBUS_PLACEHOLDER call --session --dest org.freedesktop.DBus \
+              --object-path /org/freedesktop/DBus \
+              --method org.freedesktop.DBus.NameHasOwner io.Astal.ags 2>/dev/null | grep -q true; then
+            echo "kiwi-shell is already running — use kiwictl to control it" >&2
+            exit 1
+          fi
           LOG_FILE="$HOME/.cache/kiwi-shell.log"
           mkdir -p "$(dirname "$LOG_FILE")"
-          echo "--- Starting Kiwi Shell at $(date) ---" | tee -a "$LOG_FILE"
-          BIN_PATH_PLACEHOLDER "$@" 2>&1 | tee -a "$LOG_FILE"
+          [ -f "$LOG_FILE" ] && mv -f "$LOG_FILE" "$LOG_FILE.old"
+          BIN_PATH_PLACEHOLDER 2>&1 | tee "$LOG_FILE"
           EOF
 
-          sed -i "s|BIN_PATH_PLACEHOLDER|$out/bin/.${pname}-core|" $out/bin/${pname}
+          sed -i "s|BIN_PATH_PLACEHOLDER|$out/bin/.${pname}-core|; s|GDBUS_PLACEHOLDER|${pkgs.glib.bin}/bin/gdbus|" $out/bin/${pname}
           chmod +x $out/bin/${pname}
 
           # Controller Script
