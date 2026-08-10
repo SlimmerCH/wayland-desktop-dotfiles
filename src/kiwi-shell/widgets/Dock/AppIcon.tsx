@@ -54,9 +54,63 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
 
     // hover lifecycle, taskbar style: linger on the icon to open the
     // preview flyout, it stays while the pointer is over the icon or the
-    // flyout itself, and closes shortly after leaving both
+    // flyout itself, and closes shortly after leaving both.
+    //
+    // Enter/leave events only *trigger* the close check — they no longer
+    // decide it. Mapping the flyout's popup surface yanks pointer focus off
+    // the dock layer (Hyprland 0.56: the icon gets a leave with a perfectly
+    // still cursor, and the popup never gets an enter), so the compositor's
+    // cursorpos is the authority on whether the pointer actually left —
+    // same philosophy as the dock's own reveal watchdog.
     let openTimer: ReturnType<typeof setTimeout> | null = null
     let closeTimer: ReturnType<typeof setTimeout> | null = null
+    let iconWidget: Gtk.Widget | null = null
+
+    const KEEP_SLOP_PX = 16
+
+    // is the pointer inside the icon's dock cell, or inside the flyout
+    // floating above it? Screen-space math: the dock window is a
+    // bottom-anchored monitor-wide layer, so widget bounds within it
+    // translate by the monitor geometry alone. The flyout is its own popup
+    // surface GTK centers above the icon, so its rect is reconstructed from
+    // its content size — the slop absorbs GTK's clamping at monitor edges.
+    const pointerInKeepRegion = (): boolean => {
+        if (!iconWidget) { logDebug(`[keep:${entry}] no iconWidget`); return false }
+        const root = iconWidget.get_root() as any
+        const monitor: Gdk.Monitor | null = root?.gdkmonitor ?? null
+        if (!root || !monitor) { logDebug(`[keep:${entry}] root=${!!root} monitor=${!!monitor}`); return false }
+
+        let reply: string
+        try {
+            reply = hyprland.message("cursorpos")
+        } catch {
+            logDebug(`[keep:${entry}] cursorpos IPC failed`)
+            return false // IPC down → evidence lapses → flyout closes
+        }
+        const m = reply.match(/(-?\d+),\s*(-?\d+)/)
+        if (!m) { logDebug(`[keep:${entry}] unparseable cursorpos: ${reply}`); return false }
+        const px = Number(m[1])
+        const py = Number(m[2])
+
+        const geo = monitor.get_geometry()
+        const dockTop = geo.y + geo.height - root.get_height()
+        const [ok, bounds] = iconWidget.compute_bounds(root)
+        if (!ok) { logDebug(`[keep:${entry}] compute_bounds failed`); return false }
+        const iconL = geo.x + bounds.get_x() - KEEP_SLOP_PX
+        const iconR = geo.x + bounds.get_x() + bounds.get_width() + KEEP_SLOP_PX
+        if (py >= dockTop && px >= iconL && px <= iconR) return true
+
+        if (!previews.visible) { logDebug(`[keep:${entry}] outside icon (${px},${py} vs x ${iconL}-${iconR}, dockTop ${dockTop}), no flyout`); return false }
+        const flyout = previews.get_child()?.get_allocation()
+        const w = (flyout?.width ?? 0) + 2 * KEEP_SLOP_PX
+        const h = (flyout?.height ?? 0) + 2 * KEEP_SLOP_PX
+        const cx = geo.x + bounds.get_x() + bounds.get_width() / 2
+        const inFlyout = px >= cx - w / 2 && px <= cx + w / 2 &&
+            py >= dockTop - h && py <= dockTop + KEEP_SLOP_PX
+        if (!inFlyout) logDebug(`[keep:${entry}] outside both: ptr (${px},${py}) icon x ${iconL}-${iconR} dockTop ${dockTop} flyout ${w}x${h} cx ${cx}`)
+        return inFlyout
+    }
+
     const cancelOpen = () => { if (openTimer) { clearTimeout(openTimer); openTimer = null } }
     const cancelClose = () => {
         logDebug(`[preview:${entry}] cancelClose (had timer: ${closeTimer !== null})`)
@@ -65,8 +119,14 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
     const scheduleClose = () => {
         cancelClose()
         closeTimer = setTimeout(() => {
-            logDebug(`[preview:${entry}] close timer FIRED → popdown`)
             closeTimer = null
+            if (!previews.visible) return
+            if (pointerInKeepRegion()) {
+                logDebug(`[preview:${entry}] close timer: pointer still here → re-arm`)
+                scheduleClose()
+                return
+            }
+            logDebug(`[preview:${entry}] close timer FIRED → popdown`)
             previews.popdown()
         }, PREVIEW_HOVER_CLOSE_MS)
     }
@@ -114,6 +174,7 @@ export function AppIcon({ entry, setMenuOpen }: { entry: string, setMenuOpen: (v
                     }
                 }}
                 $={(self) => {
+                    iconWidget = self
                     const gesture = new Gtk.GestureClick()
                     gesture.set_button(3)
                     gesture.connect("released", () => {
