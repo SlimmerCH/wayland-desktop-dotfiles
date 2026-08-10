@@ -7,7 +7,7 @@ import { isValidClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 import { conf } from "../config"
 import { popupGdkMonitor } from "../monitors"
-import { evalLua, luaBind, luaUnbind, isKiwiBind, focusWorkspace } from "../../hypr"
+import { evalLua, luaBind, luaUnbind, isKiwiBind, describeBind, focusWorkspace } from "../../hypr"
 
 const hyprland = Hyprland.get_default()
 
@@ -36,14 +36,18 @@ async function registerSuperTabBinds() {
         // any kiwi-described bind counts as ours: the launcher registers its
         // own SUPER_L release bind (tap-to-open) which must not read as
         // foreign
-        const foreign = binds.some((b: any) =>
+        const foreign = binds.find((b: any) =>
             b.submap === "" && !isKiwiBind(b) && (
                 (b.key === "TAB" && (b.modmask === SUPER_MODMASK || b.modmask === (SUPER_MODMASK | 1))) ||
                 // a foreign *release* bind on super itself (a press bind,
                 // like tap-to-launch, is fine)
                 (b.key === "SUPER_L" && b.modmask === SUPER_MODMASK && b.release)
             ))
-        if (foreign) return
+        if (foreign) {
+            console.warn("WorkspaceSwitcher: foreign super-tab bind found, leaving keybinds alone:",
+                describeBind(foreign))
+            return
+        }
         haveConfirm = binds.some((b: any) => b.description === "kiwi: workspaces confirm")
         haveEscape = binds.some((b: any) => b.description === "kiwi: workspaces escape")
     } catch (e) {

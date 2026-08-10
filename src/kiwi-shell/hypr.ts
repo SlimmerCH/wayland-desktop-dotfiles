@@ -8,6 +8,7 @@
 // keywords had: wiped on config reload, so registrars re-run on
 // config-reloaded.
 import Hyprland from "gi://AstalHyprland"
+import { logDebug } from "./debug"
 
 const hyprland = Hyprland.get_default()
 
@@ -30,6 +31,7 @@ function send(request: string, label: string) {
             return
         }
         if (reply.trim() !== "ok") console.error(`hypr: ${label}: ${reply}`)
+        else logDebug(`hypr: ok: ${label}`)
     })
 }
 
@@ -92,3 +94,11 @@ export function luaBind(keys: string, action: string, description: string, flags
 export const luaUnbind = (keys: string) => `hl.unbind(${luaStr(keys)})`
 
 export const isKiwiBind = (b: any) => (b.description ?? "").startsWith("kiwi:")
+
+// human-readable identity for a bind from `hyprctl binds -j` — under the lua
+// config dispatcher/arg are an opaque __lua/index, so key, modifiers and
+// description are all there is to show
+export function describeBind(b: any): string {
+    const desc = b.description ? ` "${b.description}"` : ""
+    return `mod=${b.modmask} key=${b.key}${desc} (${b.dispatcher} ${b.arg})`
+}

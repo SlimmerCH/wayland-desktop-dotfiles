@@ -9,7 +9,7 @@ import { captureWindowToTexture, getCachedTexture } from "./clientCachingService
 import { isValidClient, isMinimized, restoreClient, focusClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 import { popupGdkMonitor } from "../monitors"
-import { evalLua, luaBind, luaUnbind, isKiwiBind } from "../../hypr"
+import { evalLua, luaBind, luaUnbind, isKiwiBind, describeBind } from "../../hypr"
 
 export const [isVisible, setVisibility] = createState(false)
 export const [selectedAddress, setSelectedAddress] = createState<string | null>(null)
@@ -51,10 +51,14 @@ const ALT_MODMASK = 8
 async function registerAltTabBinds() {
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
-        const foreign = binds.some((b: any) =>
+        const foreign = binds.find((b: any) =>
             (b.key === "TAB" || b.key === "ALT_L") &&
             b.modmask === ALT_MODMASK && b.submap === "" && !isKiwiBind(b))
-        if (foreign) return
+        if (foreign) {
+            console.warn("AppSwitcher: foreign alt-tab bind found, leaving keybinds alone:",
+                describeBind(foreign))
+            return
+        }
     } catch (e) {
         console.error("AppSwitcher: failed to query binds, skipping alt-tab setup:", e)
         return

@@ -9,7 +9,7 @@ import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
 import { mapVersion } from "../desktopEntries"
 import { popupGdkMonitor } from "../monitors"
-import { evalLua, luaBind, isKiwiBind } from "../../hypr"
+import { evalLua, luaBind, isKiwiBind, describeBind } from "../../hypr"
 
 // Spotlight-style launcher: a centered glass search panel on Super+Space.
 // Type to fuzzy-search applications, arrows/Tab to select, Enter to launch,
@@ -56,10 +56,14 @@ async function registerLauncherBind() {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
         // any foreign bind on plain super (press or release — both collide
         // with tap-to-launch semantics) means the user has their own setup
-        const foreign = binds.some((b: any) =>
+        const foreign = binds.find((b: any) =>
             b.key === "SUPER_L" && b.modmask === SUPER_MODMASK &&
             b.submap === "" && !isKiwiBind(b))
-        if (foreign) return
+        if (foreign) {
+            console.warn("Launcher: foreign bind on plain super found, leaving keybinds alone:",
+                describeBind(foreign))
+            return
+        }
         haveToggle = binds.some((b: any) => b.description === "kiwi: launcher toggle")
     } catch (e) {
         console.error("Launcher: failed to query binds, skipping setup:", e)
