@@ -18,6 +18,10 @@ If you run into any problems, open an issue on GitHub.
 
 ## Requirements
 
+**Hyprland 0.56 or newer with a lua config** — Kiwi Shell talks to the
+compositor in the lua IPC dialect (hyprlang configs are being phased out
+upstream).
+
 Make sure the following services are installed and running on your system:
 
 | Service | Purpose |
@@ -82,8 +86,10 @@ kiwi
 
 To launch it automatically on login, add this to your Hyprland config:
 
-```ini
-exec-once = kiwi
+```lua
+hl.on("hyprland.start", function()
+  hl.exec_cmd("kiwi")
+end)
 ```
 
 ### kiwictl

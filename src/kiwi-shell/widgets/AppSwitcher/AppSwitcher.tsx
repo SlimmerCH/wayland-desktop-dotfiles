@@ -9,6 +9,7 @@ import { captureWindowToTexture, getCachedTexture } from "./clientCachingService
 import { isValidClient, isMinimized, restoreClient, focusClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 import { popupGdkMonitor } from "../monitors"
+import { evalLua, luaBind, luaUnbind, isKiwiBind } from "../../hypr"
 
 export const [isVisible, setVisibility] = createState(false)
 export const [selectedAddress, setSelectedAddress] = createState<string | null>(null)
@@ -32,10 +33,12 @@ hyprland.connect("notify::focused-client", () => {
 // Registers the whole alt-tab submap dynamically so users get working binds
 // out of the box (docs/AppSwitcherKeybinds.md stays the manual route). If a
 // foreign ALT+TAB or ALT+ALT_L bind exists in the root submap — the user's
-// own alt-tab — we leave the keyboard alone. Kiwictl-flavored binds (from a
-// manual setup per our docs, or a previous shell run) are unbound and
-// re-registered, so fixes to the scheme reach existing setups. Dynamic
-// keywords are wiped on config reload, so this re-runs on config-reloaded.
+// own alt-tab — we leave the keyboard alone. Kiwi's own binds (identified by
+// their "kiwi:" description — the lua config reports every bind's dispatcher
+// as "__lua", so descriptions are the only identity introspection has left)
+// are unbound and re-registered, so fixes to the scheme reach existing
+// setups. Dynamic lua binds are wiped on config reload, so this re-runs on
+// config-reloaded.
 //
 // The ALT_L release binds MUST live in the root submap: Hyprland matches a
 // bind against the submap that was active when the key was PRESSED
@@ -48,45 +51,45 @@ const ALT_MODMASK = 8
 async function registerAltTabBinds() {
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
-        const ours = (b: any) =>
-            (b.dispatcher === "exec" && b.arg.includes("kiwictl apps")) ||
-            (b.dispatcher === "submap" && (b.arg === "app_switcher" || b.arg === "reset"))
         const foreign = binds.some((b: any) =>
             (b.key === "TAB" || b.key === "ALT_L") &&
-            b.modmask === ALT_MODMASK && b.submap === "" && !ours(b))
+            b.modmask === ALT_MODMASK && b.submap === "" && !isKiwiBind(b))
         if (foreign) return
     } catch (e) {
         console.error("AppSwitcher: failed to query binds, skipping alt-tab setup:", e)
         return
     }
 
-    // one --batch call: the submap keyword is stateful (it brackets which
-    // submap the following binds land in), so order must be guaranteed
-    execAsync(["hyprctl", "--batch", [
+    // one eval chunk: executes atomically and in order (the --batch of the
+    // lua world). hl.unbind clears every bind on the combo and tolerates
+    // absence; define_submap APPENDS on redefinition, hence the unbinds
+    // inside it first.
+    evalLua([
         // clear any previous incarnation of the scheme first
-        "keyword unbind ALT, TAB",
-        "keyword unbind ALT, ALT_L",
-        "keyword submap app_switcher",
-        "keyword unbind ALT, TAB",
-        "keyword unbind ALT, ALT_L",
-        "keyword unbind , escape",
-        "keyword unbind ALT, escape",
-        "keyword submap reset",
+        luaUnbind("ALT + TAB"),
+        luaUnbind("ALT + ALT_L"),
+        `hl.define_submap("app_switcher", function()`,
+        `  ${luaUnbind("ALT + TAB")}`,
+        `  ${luaUnbind("ALT + ALT_L")}`,
+        `  ${luaUnbind("escape")}`,
+        `  ${luaUnbind("ALT + escape")}`,
+        `end)`,
         // root: entry, and the Alt-release confirm (see comment above)
-        "keyword bind ALT, TAB, exec, kiwictl apps open-next",
-        "keyword bind ALT, TAB, submap, app_switcher",
-        "keyword bindrt ALT, ALT_L, exec, kiwictl apps confirm",
-        "keyword bindrt ALT, ALT_L, submap, reset",
+        luaBind("ALT + TAB", `hl.dsp.exec_cmd("kiwictl apps open-next")`, "kiwi: apps open"),
+        luaBind("ALT + TAB", `hl.dsp.submap("app_switcher")`, "kiwi: apps submap enter"),
+        luaBind("ALT + ALT_L", `hl.dsp.exec_cmd("kiwictl apps confirm")`, "kiwi: apps confirm",
+            { release: true, transparent: true }),
+        luaBind("ALT + ALT_L", `hl.dsp.submap("reset")`, "kiwi: apps submap reset",
+            { release: true, transparent: true }),
         // submap: cycling while held, escape failsafes
-        "keyword submap app_switcher",
-        "keyword binde ALT, TAB, exec, kiwictl apps open-next",
-        "keyword bindr , escape, exec, kiwictl apps close",
-        "keyword bindr , escape, submap, reset",
-        "keyword bindr ALT, escape, exec, kiwictl apps close",
-        "keyword bindr ALT, escape, submap, reset",
-        "keyword submap reset",
-    ].join(" ; ")]).catch(e =>
-        console.error("AppSwitcher: failed to register alt-tab binds:", e))
+        `hl.define_submap("app_switcher", function()`,
+        `  ${luaBind("ALT + TAB", `hl.dsp.exec_cmd("kiwictl apps open-next")`, "kiwi: apps cycle", { repeating: true })}`,
+        `  ${luaBind("escape", `hl.dsp.exec_cmd("kiwictl apps close")`, "kiwi: apps close", { release: true })}`,
+        `  ${luaBind("escape", `hl.dsp.submap("reset")`, "kiwi: apps submap reset", { release: true })}`,
+        `  ${luaBind("ALT + escape", `hl.dsp.exec_cmd("kiwictl apps close")`, "kiwi: apps close", { release: true })}`,
+        `  ${luaBind("ALT + escape", `hl.dsp.submap("reset")`, "kiwi: apps submap reset", { release: true })}`,
+        `end)`,
+    ].join("\n"), "alt-tab binds")
 }
 
 registerAltTabBinds()

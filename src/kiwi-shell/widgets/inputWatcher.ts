@@ -2,6 +2,7 @@ import KiwiShortcuts from "gi://KiwiShortcuts"
 import { brightnessAvailable, kbdAvailable } from "./brightness"
 import { execAsync } from "ags/process"
 import Hyprland from "gi://AstalHyprland"
+import { evalLua, luaBind, luaStr } from "../hypr"
 
 const SHORTCUT_MAP: Record<string, string> = {
   'volume-up':           'volume',
@@ -13,23 +14,38 @@ const SHORTCUT_MAP: Record<string, string> = {
   'kbd-brightness-down': 'keyboardBrightness',
 }
 
-function registerHyprlandBinds() {
-  const binds = [
-    ['bind', ',', 'XF86AudioRaiseVolume,',  'global,', 'kiwi-shell:volume-up'],
-    ['bind', ',', 'XF86AudioLowerVolume,',  'global,', 'kiwi-shell:volume-down'],
-    ['bind', ',', 'XF86AudioMute,',         'global,', 'kiwi-shell:volume-mute'],
-  ]
-  if (brightnessAvailable) {
-    binds.push(['bind', ',', 'XF86MonBrightnessUp,',   'global,', 'kiwi-shell:brightness-up'])
-    binds.push(['bind', ',', 'XF86MonBrightnessDown,', 'global,', 'kiwi-shell:brightness-down'])
+async function registerHyprlandBinds() {
+  const KEY_TO_ID: Record<string, string> = {
+    'XF86AudioRaiseVolume':   'volume-up',
+    'XF86AudioLowerVolume':   'volume-down',
+    'XF86AudioMute':          'volume-mute',
+    'XF86MonBrightnessUp':    'brightness-up',
+    'XF86MonBrightnessDown':  'brightness-down',
+    'XF86KbdBrightnessUp':    'kbd-brightness-up',
+    'XF86KbdBrightnessDown':  'kbd-brightness-down',
   }
-  if (kbdAvailable) {
-    binds.push(['bind', ',', 'XF86KbdBrightnessUp,',   'global,', 'kiwi-shell:kbd-brightness-up'])
-    binds.push(['bind', ',', 'XF86KbdBrightnessDown,', 'global,', 'kiwi-shell:kbd-brightness-down'])
+  let keys = ['XF86AudioRaiseVolume', 'XF86AudioLowerVolume', 'XF86AudioMute']
+  if (brightnessAvailable) keys.push('XF86MonBrightnessUp', 'XF86MonBrightnessDown')
+  if (kbdAvailable) keys.push('XF86KbdBrightnessUp', 'XF86KbdBrightnessDown')
+
+  // never unbind these keys — users bind their own volume/brightness actions
+  // on them and hl.unbind clears a combo wholesale. Idempotence comes from
+  // skipping keys that already carry our described bind (a shell restart
+  // without a config reload leaves the previous instance's binds alive).
+  try {
+    const binds = JSON.parse(await execAsync(['hyprctl', 'binds', '-j']))
+    const registered = new Set(binds.map((b: any) => b.description))
+    keys = keys.filter(key => !registered.has(`kiwi: ${KEY_TO_ID[key]}`))
+  } catch (e) {
+    console.error('inputWatcher: failed to query binds:', e)
   }
-  for (const args of binds) {
-    execAsync(['hyprctl', 'keyword', ...args]).catch(() => {})
-  }
+  if (keys.length === 0) return
+
+  evalLua(keys.map(key => luaBind(
+    key,
+    `hl.dsp.global(${luaStr(`kiwi-shell:${KEY_TO_ID[key]}`)})`,
+    `kiwi: ${KEY_TO_ID[key]}`,
+  )).join('\n'), 'indicator key binds')
 }
 
 let manager: KiwiShortcuts.Manager | null = null

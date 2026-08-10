@@ -7,6 +7,7 @@ import { isValidClient } from "../Dock/dock-state"
 import { entryForClient, AppIconImage } from "../appIcon"
 import { conf } from "../config"
 import { popupGdkMonitor } from "../monitors"
+import { evalLua, luaBind, luaUnbind, isKiwiBind, focusWorkspace } from "../../hypr"
 
 const hyprland = Hyprland.get_default()
 
@@ -32,40 +33,38 @@ async function registerSuperTabBinds() {
     let haveEscape = false
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
-        // any kiwictl bind counts as ours: the launcher registers its own
-        // SUPER_L release bind (tap-to-open) which must not read as foreign
-        const ours = (b: any) =>
-            b.dispatcher === "exec" && b.arg.includes("kiwictl")
+        // any kiwi-described bind counts as ours: the launcher registers its
+        // own SUPER_L release bind (tap-to-open) which must not read as
+        // foreign
         const foreign = binds.some((b: any) =>
-            b.submap === "" && !ours(b) && (
+            b.submap === "" && !isKiwiBind(b) && (
                 (b.key === "TAB" && (b.modmask === SUPER_MODMASK || b.modmask === (SUPER_MODMASK | 1))) ||
                 // a foreign *release* bind on super itself (a press bind,
                 // like tap-to-launch, is fine)
                 (b.key === "SUPER_L" && b.modmask === SUPER_MODMASK && b.release)
             ))
         if (foreign) return
-        haveConfirm = binds.some((b: any) =>
-            b.key === "SUPER_L" && b.release &&
-            b.dispatcher === "exec" && b.arg.includes("kiwictl workspaces"))
-        haveEscape = binds.some((b: any) =>
-            b.key === "escape" &&
-            b.dispatcher === "exec" && b.arg.includes("kiwictl workspaces"))
+        haveConfirm = binds.some((b: any) => b.description === "kiwi: workspaces confirm")
+        haveEscape = binds.some((b: any) => b.description === "kiwi: workspaces escape")
     } catch (e) {
         console.error("WorkspaceSwitcher: failed to query binds, skipping setup:", e)
         return
     }
 
-    execAsync(["hyprctl", "--batch", [
-        "keyword unbind SUPER, TAB",
-        "keyword unbind SUPER SHIFT, TAB",
-        "keyword binde SUPER, TAB, exec, kiwictl workspaces open-next",
-        "keyword binde SUPER SHIFT, TAB, exec, kiwictl workspaces previous",
+    evalLua([
+        luaUnbind("SUPER + TAB"),
+        luaUnbind("SUPER + SHIFT + TAB"),
+        luaBind("SUPER + TAB", `hl.dsp.exec_cmd("kiwictl workspaces open-next")`,
+            "kiwi: workspaces next", { repeating: true }),
+        luaBind("SUPER + SHIFT + TAB", `hl.dsp.exec_cmd("kiwictl workspaces previous")`,
+            "kiwi: workspaces prev", { repeating: true }),
         // never unbind SUPER_L (would take tap-to-launch binds with it), so
         // only add ours when it isn't registered yet
-        ...(haveConfirm ? [] : ["keyword bindrt SUPER, SUPER_L, exec, kiwictl workspaces confirm"]),
-        ...(haveEscape ? [] : ["keyword bindr SUPER, escape, exec, kiwictl workspaces close"]),
-    ].join(" ; ")]).catch(e =>
-        console.error("WorkspaceSwitcher: failed to register binds:", e))
+        ...(haveConfirm ? [] : [luaBind("SUPER + SUPER_L", `hl.dsp.exec_cmd("kiwictl workspaces confirm")`,
+            "kiwi: workspaces confirm", { release: true, transparent: true })]),
+        ...(haveEscape ? [] : [luaBind("SUPER + escape", `hl.dsp.exec_cmd("kiwictl workspaces close")`,
+            "kiwi: workspaces escape", { release: true })]),
+    ].join("\n"), "super-tab binds")
 }
 
 registerSuperTabBinds()
@@ -130,7 +129,7 @@ function cycle(dir: 1 | -1) {
 
 function confirmAndClose() {
     if (!isVisible()) return
-    hyprland.dispatch("workspace", `${selectedId()}`)
+    focusWorkspace(selectedId())
     setVisibility(false)
 }
 

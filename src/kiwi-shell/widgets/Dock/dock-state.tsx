@@ -5,6 +5,7 @@ import GLib from "gi://GLib"
 import Hyprland from "gi://AstalHyprland"
 import { classToEntry as _classToEntry, entryToClass as _entryToClass, mapVersion } from "../desktopEntries"
 import { entryForClient } from "../appIcon"
+import { clientSelector, focusWindow, moveWindowToWorkspace, raiseWindow, toggleSpecialWorkspace } from "../../hypr"
 
 export const DOCK_HIDE_TIMEOUT = 200
 export const JUMP_ANIMATION_CLASS_TIMEOUT = 500
@@ -62,9 +63,7 @@ export function isValidClient(client: any): boolean {
 
 export const MINIMIZED_WS = "special:minimized"
 
-// Astal strips the leading 0x from client addresses, but Hyprland's
-// address: window selector requires it
-const addr = (client: Hyprland.Client) => `address:0x${client.address}`
+const addr = clientSelector
 
 export function isMinimized(client: Hyprland.Client): boolean {
     return client.workspace?.name === MINIMIZED_WS
@@ -78,22 +77,22 @@ export function isClientVisible(client: Hyprland.Client): boolean {
 }
 
 export function minimizeClient(client: Hyprland.Client) {
-    hyprland.dispatch("movetoworkspacesilent", `${MINIMIZED_WS},${addr(client)}`)
+    moveWindowToWorkspace(MINIMIZED_WS, addr(client), { follow: false })
 }
 
 // Hyprland keeps focus and stacking separate: focusing a floating window
 // does not raise it above overlapping siblings, so every activation path
 // raises explicitly.
 export function focusClient(client: Hyprland.Client) {
-    client.focus()
-    hyprland.dispatch("alterzorder", `top,${addr(client)}`)
+    focusWindow(addr(client))
+    raiseWindow(addr(client))
 }
 
 export function restoreClient(client: Hyprland.Client) {
-    // movetoworkspace (non-silent) also focuses the window, so it lands on
-    // the current workspace ready to use
-    hyprland.dispatch("movetoworkspace", `${hyprland.focusedWorkspace.id},${addr(client)}`)
-    hyprland.dispatch("alterzorder", `top,${addr(client)}`)
+    // a following move also focuses the window, so it lands on the current
+    // workspace ready to use
+    moveWindowToWorkspace(hyprland.focusedWorkspace.id, addr(client))
+    raiseWindow(addr(client))
 }
 
 // ─── Focus-steal guard ────────────────────────────────────────────────────────
@@ -113,15 +112,15 @@ hyprland.connect("notify::focused-workspace", () => {
 hyprland.connect("notify::focused-client", () => {
     const client = hyprland.focusedClient
     if (!client || !isMinimized(client)) return
-    hyprland.dispatch("movetoworkspace", `${lastNormalWs},${addr(client)}`)
-    hyprland.dispatch("alterzorder", `top,${addr(client)}`)
+    moveWindowToWorkspace(lastNormalWs, addr(client))
+    raiseWindow(addr(client))
     // the overlay state settles asynchronously (socket events), so check
     // slightly later whether it is still open — it auto-closes only when
     // the restored window was the last one minimized
     setTimeout(() => {
         for (const m of hyprland.get_monitors()) {
             if (m.specialWorkspace?.name === MINIMIZED_WS)
-                hyprland.dispatch("togglespecialworkspace", "minimized")
+                toggleSpecialWorkspace("minimized")
         }
     }, 150)
 })

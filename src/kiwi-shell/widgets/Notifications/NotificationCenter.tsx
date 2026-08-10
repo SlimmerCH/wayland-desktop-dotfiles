@@ -10,6 +10,7 @@ import Pango from "gi://Pango"
 
 import { conf } from "../config"
 import { popupGdkMonitor } from "../monitors"
+import { clientSelector, focusWindow } from "../../hypr"
 
 const DEFAULT_TIMEOUT = 5000
 const NOTIF_WIDTH = 360
@@ -896,7 +897,7 @@ function focusApp(n: Notifd.Notification) {
             const cls = (c["class"] ?? "").toLowerCase()
             return targets.some(t => t === initialClass || t === cls)
         })
-        client?.focus()
+        if (client) focusWindow(clientSelector(client))
     } catch (error) {
         console.error("Failed to focus app for notification:", error)
     }

@@ -9,6 +9,7 @@ import Hyprland from "gi://AstalHyprland"
 import { conf } from "../config"
 import { mapVersion } from "../desktopEntries"
 import { popupGdkMonitor } from "../monitors"
+import { evalLua, luaBind, isKiwiBind } from "../../hypr"
 
 // Spotlight-style launcher: a centered glass search panel on Super+Space.
 // Type to fuzzy-search applications, arrows/Tab to select, Enter to launch,
@@ -47,38 +48,27 @@ const results = createComputed(get => {
 const SUPER_MODMASK = 64
 
 async function registerLauncherBind() {
-    let staleSpaceBind = false
+    // (the super+space cleanup for pre-tap-to-launch kiwi versions is gone:
+    // those were dynamic keyword binds, and no keyword bind can survive into
+    // a lua-config compositor)
     let haveToggle = false
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
-        const ours = (b: any) =>
-            b.dispatcher === "exec" && b.arg.includes("kiwictl")
         // any foreign bind on plain super (press or release — both collide
         // with tap-to-launch semantics) means the user has their own setup
         const foreign = binds.some((b: any) =>
             b.key === "SUPER_L" && b.modmask === SUPER_MODMASK &&
-            b.submap === "" && !ours(b))
+            b.submap === "" && !isKiwiBind(b))
         if (foreign) return
-        haveToggle = binds.some((b: any) =>
-            b.key === "SUPER_L" && b.release &&
-            b.dispatcher === "exec" && b.arg.includes("kiwictl launcher"))
-        // earlier kiwi versions bound super+space — clean that up
-        staleSpaceBind = binds.some((b: any) =>
-            b.key.toLowerCase() === "space" && b.modmask === SUPER_MODMASK &&
-            b.dispatcher === "exec" && b.arg.includes("kiwictl launcher"))
+        haveToggle = binds.some((b: any) => b.description === "kiwi: launcher toggle")
     } catch (e) {
         console.error("Launcher: failed to query binds, skipping setup:", e)
         return
     }
+    if (haveToggle) return
 
-    const batch = [
-        ...(staleSpaceBind ? ["keyword unbind SUPER, space"] : []),
-        ...(haveToggle ? [] : ["keyword bindr SUPER, SUPER_L, exec, kiwictl launcher toggle"]),
-    ]
-    if (batch.length === 0) return
-
-    execAsync(["hyprctl", "--batch", batch.join(" ; ")]).catch(e =>
-        console.error("Launcher: failed to register bind:", e))
+    evalLua(luaBind("SUPER + SUPER_L", `hl.dsp.exec_cmd("kiwictl launcher toggle")`,
+        "kiwi: launcher toggle", { release: true }), "launcher bind")
 }
 
 registerLauncherBind()

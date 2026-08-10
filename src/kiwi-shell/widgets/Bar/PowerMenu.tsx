@@ -10,7 +10,7 @@ const buttons = [
   { name: "reboot", icon: "system-reboot-symbolic", exec: "reboot", confirm: true },
   { name: "sleep", icon: "bed-symbolic", exec: "systemctl sleep", confirm: false },
   { name: "lock", icon: "object-locked-symbolic", exec: "hyprlock", confirm: false },
-  { name: "lock", icon: "exit-symbolic", exec: "hyprctl dispatch exit", confirm: false },
+  { name: "lock", icon: "exit-symbolic", exec: "hyprctl dispatch hl.dsp.exit()", confirm: false },
 ]
 
 function PowerButton(icon: string, command: string) {
