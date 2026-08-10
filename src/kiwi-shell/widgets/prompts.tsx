@@ -1,3 +1,5 @@
+import { logger } from "../log"
+const log = logger("prompts")
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createBinding, For } from "ags"
@@ -106,13 +108,13 @@ async function submitWifiPassword(ssid, password) {
         let errorLabel = "Failed to connect to Wi-Fi. Error: "+e
         if (String(e).includes("Insufficient privileges")) {
             // show error to user
-            console.error("Insufficient privileges. Add yourself to the 'network' group to fix this.")
+            log.error("Insufficient privileges. Add yourself to the 'network' group to fix this.")
         } else if (String(e).includes("Secrets were required, but not provided") ||
             String(e).includes("property is invalid")) {
             setpwInvalid(true)
             setShowPrompt(true)
             return;
         }
-        console.error(errorLabel)        
+        log.error(errorLabel)        
     }
 }

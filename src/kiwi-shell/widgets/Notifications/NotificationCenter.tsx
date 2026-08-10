@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("notifications")
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import Notifd from "gi://AstalNotifd"
@@ -899,7 +901,7 @@ function focusApp(n: Notifd.Notification) {
         })
         if (client) focusWindow(clientSelector(client))
     } catch (error) {
-        console.error("Failed to focus app for notification:", error)
+        log.error("Failed to focus app for notification:", error)
     }
 }
 
@@ -907,6 +909,6 @@ function openUri(uri: string) {
     try {
         Gio.AppInfo.launch_default_for_uri(uri, null)
     } catch (error) {
-        console.error("Failed to open link:", error)
+        log.error("Failed to open link:", error)
     }
 }

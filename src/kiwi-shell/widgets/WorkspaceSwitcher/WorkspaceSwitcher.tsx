@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("workspaces")
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createEffect, For } from "ags"
@@ -44,18 +46,18 @@ async function registerSuperTabBinds() {
                 (b.key === "SUPER_L" && b.modmask === SUPER_MODMASK && b.release)
             ))
         if (foreign) {
-            console.warn("WorkspaceSwitcher: foreign super-tab bind found, leaving keybinds alone:",
+            log.warn("foreign super-tab bind found, leaving keybinds alone:",
                 describeBind(foreign))
             return
         }
         haveConfirm = binds.some((b: any) => b.description === "kiwi: workspaces confirm")
         haveEscape = binds.some((b: any) => b.description === "kiwi: workspaces escape")
     } catch (e) {
-        console.error("WorkspaceSwitcher: failed to query binds, skipping setup:", e)
+        log.error("failed to query binds, skipping setup:", e)
         return
     }
 
-    evalLua([
+    const ok = await evalLua([
         luaUnbind("SUPER + TAB"),
         luaUnbind("SUPER + SHIFT + TAB"),
         luaBind("SUPER + TAB", `hl.dsp.exec_cmd("kiwictl workspaces open-next")`,
@@ -69,6 +71,7 @@ async function registerSuperTabBinds() {
         ...(haveEscape ? [] : [luaBind("SUPER + escape", `hl.dsp.exec_cmd("kiwictl workspaces close")`,
             "kiwi: workspaces escape", { release: true })]),
     ].join("\n"), "super-tab binds")
+    if (ok) log.info("registered super-tab binds")
 }
 
 registerSuperTabBinds()

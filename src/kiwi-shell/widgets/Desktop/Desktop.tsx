@@ -8,7 +8,8 @@ import GLib from "gi://GLib"
 import Pango from "gi://Pango"
 import { conf } from "../config"
 import { openPath } from "../Dock/dock-utils"
-import { logDebug } from "../../debug"
+import { logger } from "../../log"
+const log = logger("desktop")
 
 // Desktop icons: the contents of the XDG desktop folder rendered on a
 // BOTTOM-layer surface — above the wallpaper, below every window. Icons
@@ -88,10 +89,10 @@ function readItems(): DesktopItem[] {
 function refresh() {
     try {
         const next = readItems()
-        logDebug(`[Desktop] refresh → ${next.length} item(s)`)
+        log.debug(`[Desktop] refresh → ${next.length} item(s)`)
         setItems(next)
     } catch (e) {
-        console.error(`Desktop: failed to list ${DESKTOP_DIR}:`, e)
+        log.error(`Desktop: failed to list ${DESKTOP_DIR}:`, e)
         setItems([])
     }
 }
@@ -104,7 +105,7 @@ function watchDesktopDir() {
 
     const monitor = dir.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, null)
     monitor.connect("changed", (_mon, file, _other, eventType) => {
-        logDebug(`[Desktop] fs event ${eventType} on ${file?.get_basename() ?? "?"}`)
+        log.debug(`[Desktop] fs event ${eventType} on ${file?.get_basename() ?? "?"}`)
         if (refreshTimeout !== null) GLib.source_remove(refreshTimeout)
         refreshTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
             refreshTimeout = null
@@ -131,7 +132,7 @@ function openItem(item: DesktopItem) {
     try {
         Gio.AppInfo.launch_default_for_uri(GLib.filename_to_uri(item.path, null), null)
     } catch (e) {
-        console.error(`Desktop: failed to open ${item.path}:`, e)
+        log.error(`Desktop: failed to open ${item.path}:`, e)
     }
 }
 
@@ -139,7 +140,7 @@ function trashItem(item: DesktopItem) {
     try {
         Gio.File.new_for_path(item.path).trash(null)
     } catch (e) {
-        console.error(`Desktop: failed to trash ${item.path}:`, e)
+        log.error(`Desktop: failed to trash ${item.path}:`, e)
     }
 }
 
@@ -163,7 +164,7 @@ function copyItems(list: DesktopItem[], cut = false) {
     if (list.length === 0) return
     const uris = list.map((i) => GLib.filename_to_uri(i.path, null))
     getClipboard().set_content(fileContentProvider(uris, cut))
-    logDebug(`[Desktop] ${cut ? "cut" : "copied"} ${list.length} item(s)`)
+    log.debug(`[Desktop] ${cut ? "cut" : "copied"} ${list.length} item(s)`)
 }
 
 function clipboardHasFiles(): boolean {
@@ -208,7 +209,7 @@ function pasteUris(uris: string[], cut: boolean, destDir = DESKTOP_DIR): string[
             Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE)
             created.push(dest.get_path()!)
         } catch (e) {
-            console.error(`Desktop: failed to paste ${srcPath}:`, e)
+            log.error(`Desktop: failed to paste ${srcPath}:`, e)
         }
     }
     return created
@@ -225,7 +226,7 @@ function pasteFromClipboard() {
             try {
                 ;[stream, mime] = cb.read_finish(res)
             } catch (e) {
-                logDebug("[Desktop] paste: clipboard holds no files")
+                log.debug("[Desktop] paste: clipboard holds no files")
                 return
             }
             const out = Gio.MemoryOutputStream.new_resizable()
@@ -237,7 +238,7 @@ function pasteFromClipboard() {
                     try {
                         out.splice_finish(spliceRes)
                     } catch (e) {
-                        console.error("Desktop: paste read failed:", e)
+                        log.error("paste read failed:", e)
                         return
                     }
                     const text = new TextDecoder()
@@ -247,7 +248,7 @@ function pasteFromClipboard() {
                     let cut = false
                     if (mime === "application/x-gnome-copied-files")
                         cut = lines.shift() === "cut"
-                    logDebug(`[Desktop] paste ${lines.length} uri(s)`
+                    log.debug(`[Desktop] paste ${lines.length} uri(s)`
                         + ` (${cut ? "cut" : "copy"})`)
                     pasteUris(lines, cut)
                 })
@@ -363,7 +364,7 @@ function saveLayout() {
         const obj: Record<string, [number, number]> = {}
         for (const [p, s] of layout) obj[p] = [s.col, s.row]
         writeFileAsync(LAYOUT_FILE, JSON.stringify(obj, null, 2))
-            .catch((e) => console.error("Desktop: failed to save layout:", e))
+            .catch((e) => log.error("failed to save layout:", e))
         return GLib.SOURCE_REMOVE
     })
 }
@@ -515,7 +516,7 @@ function handleFileDrop(
 ): boolean {
     const uris = value.get_files().map((f: Gio.File) => f.get_uri())
     if (uris.length === 0) return false
-    logDebug(`[Desktop] drop ${uris.length} uri(s) (${move ? "move" : "copy"}) → ${destDir}`)
+    log.debug(`[Desktop] drop ${uris.length} uri(s) (${move ? "move" : "copy"}) → ${destDir}`)
     const created = pasteUris(uris, move, destDir)
     if (dropAt && destDir === DESKTOP_DIR && freePlacement())
         seedSlots(created, dropAt.x, dropAt.y)
@@ -585,7 +586,7 @@ function openWithDialog(item: DesktopItem) {
             try {
                 appInfo?.launch([file], null)
             } catch (e) {
-                console.error(`Desktop: failed to open ${item.path} with ${appInfo?.get_name()}:`, e)
+                log.error(`Desktop: failed to open ${item.path} with ${appInfo?.get_name()}:`, e)
             }
         }
         d.destroy()
@@ -655,7 +656,7 @@ function DesktopIcon({ item }: { item: DesktopItem }) {
                     dragOriginPath = item.path
                     const uris = targets().map((i) =>
                         GLib.filename_to_uri(i.path, null))
-                    logDebug(`[Desktop] drag ${uris.length} item(s)`)
+                    log.debug(`[Desktop] drag ${uris.length} item(s)`)
                     return fileContentProvider(uris)
                 })
                 drag.connect("drag-begin", (source) => {

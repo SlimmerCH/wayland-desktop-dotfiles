@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("dock")
 import { createState, createComputed, createBinding } from "ags"
 import { readFile, writeFileAsync } from "ags/file"
 import { conf } from "../config"
@@ -49,7 +51,7 @@ export async function saveList() {
     try {
         await writeFileAsync(APPLIST_FILE, JSON.stringify(list(), null, 2))
     } catch (error) {
-        console.error("Failed to save dock apps:", error)
+        log.error("Failed to save dock apps:", error)
     }
 }
 

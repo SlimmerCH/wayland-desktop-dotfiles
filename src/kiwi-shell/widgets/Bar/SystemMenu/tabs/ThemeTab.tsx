@@ -4,7 +4,8 @@ import { exec, execAsync } from "ags/process"
 import Gio from "gi://Gio"
 
 import { conf, setConf, writeConf } from "../../../config"
-import { logDebug } from "../../../../debug"
+import { logger } from "../../../../log"
+const log = logger("theme")
 import { Icon } from "../../../iconNames";
 
 function getCurrentWallpaper(connector?: string): string | null {
@@ -20,7 +21,7 @@ function getCurrentWallpaper(connector?: string): string | null {
         return match ? match[1].trim() : null
     } catch (error) {
         execAsync("awww-daemon").catch(() => {})
-        logDebug("awww daemon not running, starting...")
+        log.debug("awww daemon not running, starting...")
     }
     return null
 }
@@ -41,19 +42,19 @@ function setupWallpaperPolling() {
     }
     
     if (!retryInterval) {
-        logDebug("Starting wallpaper polling...")
+        log.debug("Starting wallpaper polling...")
         // capped: without awww installed this would otherwise spawn two
         // processes every 2s for the lifetime of the shell
         let attempts = 0
         retryInterval = setInterval(() => {
             const path = getCurrentWallpaper()
             if (path) {
-                logDebug("Successfully connected to awww daemon")
+                log.debug("Successfully connected to awww daemon")
                 storeWallpaperPath(path)
             } else if (++attempts < 15) {
                 return
             } else {
-                logDebug("Giving up on awww daemon")
+                log.debug("Giving up on awww daemon")
             }
             clearInterval(retryInterval!)
             retryInterval = null
@@ -80,7 +81,7 @@ export default function ThemeTab({visible}) {
             const t = Gdk.Texture.new_from_file(file)
             setTexture(t)
         } catch (e) {
-            console.error("Failed to load texture:", e)
+            log.error("Failed to load texture:", e)
             setTexture(null)
         }
     })
@@ -224,11 +225,11 @@ function promptWallpaper() {
                     storeWallpaperPath(cleanPath)
                 })
                 .catch((error) => {
-                    console.error("Failed to set wallpaper:", error)
+                    log.error("Failed to set wallpaper:", error)
                 })
         })
         .catch(() => {
-            console.log("Wallpaper selection cancelled or failed.")
+            log.info("Wallpaper selection cancelled or failed.")
         })
 }
 

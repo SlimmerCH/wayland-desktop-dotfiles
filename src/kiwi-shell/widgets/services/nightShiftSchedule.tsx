@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("nightshift")
 import { conf } from "../config";
 import GLib from "gi://GLib";
 import { execAsync } from "ags/process";
@@ -35,7 +37,7 @@ function enableNightShift() {
     try {
         GLib.spawn_command_line_async(`hyprsunset -t ${conf().nightshift_intensity}`);
     } catch (e) {
-        console.error("nightshift: failed to spawn hyprsunset:", e);
+        log.error("nightshift: failed to spawn hyprsunset:", e);
         return;
     }
     setNightShift(true);
@@ -46,7 +48,7 @@ function disableNightShift() {
     try {
         GLib.spawn_command_line_async("killall hyprsunset");
     } catch (e) {
-        console.error("nightshift: failed to spawn killall:", e);
+        log.error("nightshift: failed to spawn killall:", e);
         return;
     }
     setNightShift(false);

@@ -16,7 +16,7 @@ import { conf } from "../../config"
 import { Icon } from "../../iconNames"
 import { playSound } from "../../sound"
 import { closeNc } from "../../Notifications/NotificationCenter"
-import { debug } from "../../../debug"
+import { debugMode } from "../../../log"
 
 import AstalBluetooth from "gi://AstalBluetooth?version=0.1"
 import BluetoothTab from "./tabs/BluetoothTab"
@@ -138,7 +138,7 @@ export default function SystemMenu() {
     <popover
       hasArrow={false}
       class="system-menu-popover"
-      autohide={debug((b) => !b)}
+      autohide={debugMode((b) => !b)}
       $={(self) => (systemMenuPopover = self)}
       onShow={() => {
         setSystemMenuOpen(true)

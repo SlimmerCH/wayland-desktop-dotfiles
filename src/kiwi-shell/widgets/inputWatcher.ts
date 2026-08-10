@@ -1,3 +1,5 @@
+import { logger } from "../log"
+const log = logger("mediakeys")
 import KiwiShortcuts from "gi://KiwiShortcuts"
 import { brightnessAvailable, kbdAvailable } from "./brightness"
 import { execAsync } from "ags/process"
@@ -28,24 +30,23 @@ async function registerHyprlandBinds() {
   if (brightnessAvailable) keys.push('XF86MonBrightnessUp', 'XF86MonBrightnessDown')
   if (kbdAvailable) keys.push('XF86KbdBrightnessUp', 'XF86KbdBrightnessDown')
 
-  // never unbind these keys — users bind their own volume/brightness actions
-  // on them and hl.unbind clears a combo wholesale. Idempotence comes from
-  // skipping keys that already carry our described bind (a shell restart
-  // without a config reload leaves the previous instance's binds alive).
+  // never unbind these keys (users bind their own actions on them); skip
+  // keys that already carry our described bind instead
   try {
     const binds = JSON.parse(await execAsync(['hyprctl', 'binds', '-j']))
     const registered = new Set(binds.map((b: any) => b.description))
     keys = keys.filter(key => !registered.has(`kiwi: ${KEY_TO_ID[key]}`))
   } catch (e) {
-    console.error('inputWatcher: failed to query binds:', e)
+    log.error('failed to query binds:', e)
   }
   if (keys.length === 0) return
 
-  evalLua(keys.map(key => luaBind(
+  if (await evalLua(keys.map(key => luaBind(
     key,
     `hl.dsp.global(${luaStr(`kiwi-shell:${KEY_TO_ID[key]}`)})`,
     `kiwi: ${KEY_TO_ID[key]}`,
-  )).join('\n'), 'indicator key binds')
+  )).join('\n'), 'indicator key binds'))
+    log.info(`registered global binds: ${keys.join(', ')}`)
 }
 
 let manager: KiwiShortcuts.Manager | null = null

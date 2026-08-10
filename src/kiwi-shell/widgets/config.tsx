@@ -1,3 +1,5 @@
+import { logger } from "../log"
+const log = logger("config")
 import { readFile, writeFileAsync, monitorFile } from "ags/file"
 import { createState } from "ags"
 import { exec } from "ags/process"
@@ -71,7 +73,7 @@ async function writeHypr(primaryColor: string) {
         const hyprString = `$kiwiColor = ${kiwiColor}\n$kiwiColorLight = ${kiwiColorTransparent}`
         await writeFileAsync(HYPR_FILE, hyprString)
     } catch (error) {
-        console.error("Failed to save hypr colors:", error)
+        log.error("Failed to save hypr colors:", error)
     }
 }
 
@@ -93,7 +95,7 @@ function reloadConfig() {
         const defaultConfig = JSON.parse(defaultContent)
         setConf(deepMerge(defaultConfig, JSON.parse(content)))
     } catch (error) {
-        console.error("Failed to reload config:", error)
+        log.error("Failed to reload config:", error)
     }
 }
 
@@ -115,7 +117,7 @@ export async function writeConf() {
     try {
         await writeFileAsync(CONFIG_FILE, jsonString)
     } catch (error) {
-        console.error("Failed to save config:", error)
+        log.error("Failed to save config:", error)
     }
 
     await writeHypr(currentConf.primary_color)

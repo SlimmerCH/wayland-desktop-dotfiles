@@ -6,7 +6,8 @@ import { exec } from "ags/process"
 
 import { Icon, BluetoothDeviceIcon } from "../../../iconNames"
 import { KeyedList } from "../../../KeyedList"
-import { logDebug } from "../../../../debug"
+import { logger } from "../../../../log"
+const log = logger("bluetooth")
 import { bluetoothTabOpen } from "../SystemMenu"
 
 function hasBluetoothAdapter(): boolean {
@@ -234,7 +235,7 @@ function DeviceContextMenu(device, connectedBinding, pairedBinding) {
 }
 
 function connectDevice(device) {
-  logDebug("Connecting to", device.name)
+  log.debug("Connecting to", device.name)
   // Connecting/pairing while the adapter is actively scanning makes the
   // controller time-slice between scan and connect, which causes Page Timeout /
   // AuthenticationTimeout. Pause discovery for the operation and resume it
@@ -243,9 +244,9 @@ function connectDevice(device) {
   device.connect_device((source, result) => {
     try {
       device.connect_device_finish(result)
-      logDebug("Connected successfully!")
+      log.debug("Connected successfully!")
     } catch (err) {
-      console.error("Connect failed:", err)
+      log.error("Connect failed:", err)
     } finally {
       if (bluetoothTabOpen()) startBluetoothDiscovery()
     }
@@ -253,19 +254,19 @@ function connectDevice(device) {
 }
 
 function disconnectDevice(device) {
-  logDebug("Disconnecting from", device.name)
+  log.debug("Disconnecting from", device.name)
   device.disconnect_device((source, result) => {
     try {
       device.disconnect_device_finish(result)
-      logDebug("Disconnected successfully!")
+      log.debug("Disconnected successfully!")
     } catch (err) {
-      console.error("Disconnect failed:", err)
+      log.error("Disconnect failed:", err)
     }
   })
 }
 
 function pairDevice(device) {
-  logDebug("Pairing with", device.name)
+  log.debug("Pairing with", device.name)
   // pair() is a SYNCHRONOUS bluez call that throws on failure (unlike
   // connect/disconnect which are async) — it blocks the shell until pairing
   // completes or times out. It must be wrapped: the context-menu "Pair &
@@ -286,7 +287,7 @@ function pairDevice(device) {
       device.trusted = true
       connectDevice(device)
     } else {
-      console.error("Pair failed:", err)
+      log.error("Pair failed:", err)
       if (bluetoothTabOpen()) startBluetoothDiscovery()
     }
     return
@@ -297,10 +298,10 @@ function pairDevice(device) {
 
 function forgetDevice(device) {
   try {
-    logDebug("Removing device", device.name)
+    log.debug("Removing device", device.name)
     adapter?.remove_device(device)
   } catch (error) {
-    console.error("Failed to remove device:", error)
+    log.error("Failed to remove device:", error)
   }
 }
 
@@ -317,6 +318,6 @@ async function handleDeviceClick(device) {
       pairDevice(device)
     }
   } catch (error) {
-    console.error("Bluetooth operation failed:", error)
+    log.error("Bluetooth operation failed:", error)
   }
 }

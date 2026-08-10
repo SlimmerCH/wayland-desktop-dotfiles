@@ -1,6 +1,6 @@
 import Quarrel from "gi://Quarrel"
 import app from "ags/gtk4/app"
-import { setDebug } from "./debug"
+import { setLogLevel } from "./log"
 import { toggleAppSwitcher } from "./widgets/AppSwitcher/AppSwitcher"
 import { toggleWorkspaceSwitcher } from "./widgets/WorkspaceSwitcher/WorkspaceSwitcher"
 import { toggleLauncher } from "./widgets/Launcher/Launcher"
@@ -96,7 +96,7 @@ export function handleCliRequest(argv: string[], respond: (response: string) => 
     }
 
     if (matched === c.debug) {
-        setDebug(true)
+        setLogLevel("debug")
         respond("debug logging enabled")
         return
     }

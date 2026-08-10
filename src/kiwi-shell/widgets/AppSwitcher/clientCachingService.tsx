@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("app-capture")
 import { Gdk } from "ags/gtk4"
 import AppCapture from "gi://AppCapture?version=1.0"
 import Hyprland from "gi://AstalHyprland"
@@ -77,7 +79,7 @@ function captureNow(address: string): Promise<Gdk.Texture | null> {
                     try {
                         texture = buildTexture(bytes, width, height, stride)
                     } catch (e) {
-                        console.error(`AppCapture: buildTexture failed for ${address}: ${e}`)
+                        log.error(`buildTexture failed for ${address}: ${e}`)
                     }
                     if (texture) cache.set(address, { texture, capturedAt: Date.now() })
                     finish(texture)
@@ -93,7 +95,7 @@ function captureNow(address: string): Promise<Gdk.Texture | null> {
             )
 
             safetyId = setTimeout(() => {
-                console.error(`AppCapture: safety timeout for ${address} — wayland event loop stalled?`)
+                log.error(`safety timeout for ${address} — wayland event loop stalled?`)
                 finish(null)
             }, SAFETY_TIMEOUT_MS)
 

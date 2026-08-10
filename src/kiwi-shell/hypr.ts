@@ -1,15 +1,10 @@
-// Hyprland ≥0.56 lua-config IPC. Under a lua config the socket has no legacy
-// dialect left: a `dispatch` payload is a lua expression building an
-// HL.Dispatcher, and `keyword` is rejected outright ("keyword can't work with
-// non-legacy parsers. Use eval.") — while still exiting 0, so the reply TEXT
-// is the only failure signal there is. Every request here checks it.
-//
-// Dynamic binds/submaps made through eval share the lifetime the old dynamic
-// keywords had: wiped on config reload, so registrars re-run on
-// config-reloaded.
+// Hyprland ≥0.56 lua-config IPC: dispatch payloads are lua expressions and
+// `keyword` is gone (rejected with exit 0!), so every request checks the
+// reply text — the only failure signal there is.
 import Hyprland from "gi://AstalHyprland"
-import { logDebug } from "./debug"
+import { logger } from "./log"
 
+const log = logger("hypr")
 const hyprland = Hyprland.get_default()
 
 // a lua double-quoted string literal
@@ -17,33 +12,40 @@ export function luaStr(s: string): string {
     return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"'
 }
 
-// Astal strips the leading 0x from client addresses, but Hyprland's
-// address: window selector requires it
+// Astal strips the leading 0x from client addresses; the address: selector
+// needs it back
 export const clientSelector = (client: Hyprland.Client) => `address:0x${client.address}`
 
-function send(request: string, label: string) {
-    hyprland.message_async(request, (_src: any, res: any) => {
-        let reply: string
-        try {
-            reply = hyprland.message_finish(res)
-        } catch (e) {
-            console.error(`hypr: ${label}:`, e)
-            return
-        }
-        if (reply.trim() !== "ok") console.error(`hypr: ${label}: ${reply}`)
-        else logDebug(`hypr: ok: ${label}`)
+// resolves true on "ok"; failures are logged, never thrown
+function send(request: string, label: string): Promise<boolean> {
+    return new Promise(resolve => {
+        hyprland.message_async(request, (_src: any, res: any) => {
+            try {
+                const reply = hyprland.message_finish(res)
+                if (reply.trim() === "ok") {
+                    log.debug(`ok: ${label}`)
+                    resolve(true)
+                } else {
+                    log.error(`${label}: ${reply}`)
+                    resolve(false)
+                }
+            } catch (e) {
+                log.error(`${label}:`, e as Error)
+                resolve(false)
+            }
+        })
     })
 }
 
-// run a lua chunk in the compositor's config context. One chunk executes
-// atomically and in order — the replacement for `hyprctl --batch`.
-export function evalLua(code: string, label?: string) {
-    send(`eval ${code}`, label ?? code.slice(0, 60))
+// run a lua chunk in the compositor — atomic and ordered, the --batch of
+// the lua world. Binds made here are wiped on config reload.
+export function evalLua(code: string, label?: string): Promise<boolean> {
+    return send(`eval ${code}`, label ?? code.slice(0, 60))
 }
 
 // execute a single dispatcher, e.g. dispatchLua('hl.dsp.window.close()')
-export function dispatchLua(dispatcher: string) {
-    send(`dispatch ${dispatcher}`, dispatcher.slice(0, 60))
+export function dispatchLua(dispatcher: string): Promise<boolean> {
+    return send(`dispatch ${dispatcher}`, dispatcher.slice(0, 60))
 }
 
 // ─── dispatch helpers ─────────────────────────────────────────────────────────
@@ -71,10 +73,8 @@ export const toggleSpecialWorkspace = (name: string) =>
     dispatchLua(`hl.dsp.workspace.toggle_special(${luaStr(name)})`)
 
 // ─── bind registration ────────────────────────────────────────────────────────
-// Every kiwi-registered bind carries a "kiwi: ..." description: since the lua
-// config reports every bind's dispatcher as "__lua" with an opaque arg,
-// descriptions are the only introspectable identity `hyprctl binds -j` has
-// left. isKiwiBind() is the reader side.
+// Every kiwi bind carries a "kiwi: ..." description — with all dispatchers
+// reported as "__lua", descriptions are the only identity introspection has.
 
 export type BindFlags = {
     repeating?: boolean
@@ -90,14 +90,12 @@ export function luaBind(keys: string, action: string, description: string, flags
     return `hl.bind(${luaStr(keys)}, ${action}, { ${opts.join(", ")} })`
 }
 
-// lua source for clearing every bind on a key combo (tolerates absence)
+// clears every bind on a key combo, tolerates absence
 export const luaUnbind = (keys: string) => `hl.unbind(${luaStr(keys)})`
 
 export const isKiwiBind = (b: any) => (b.description ?? "").startsWith("kiwi:")
 
-// human-readable identity for a bind from `hyprctl binds -j` — under the lua
-// config dispatcher/arg are an opaque __lua/index, so key, modifiers and
-// description are all there is to show
+// bind identity for log lines (dispatcher/arg are an opaque __lua/index)
 export function describeBind(b: any): string {
     const desc = b.description ? ` "${b.description}"` : ""
     return `mod=${b.modmask} key=${b.key}${desc} (${b.dispatcher} ${b.arg})`

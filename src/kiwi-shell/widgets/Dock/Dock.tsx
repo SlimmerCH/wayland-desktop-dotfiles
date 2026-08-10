@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("dock")
 import app from "ags/gtk4/app"
 import App from "ags/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
@@ -47,7 +49,7 @@ function pickRandomArpeggio(): string {
         if (folders.length === 0) return ""
         return folders[Math.floor(Math.random() * folders.length)]
     } catch (e) {
-        console.error("Failed to pick arpeggio folder:", e)
+        log.error("Failed to pick arpeggio folder:", e)
         return ""
     }
 }

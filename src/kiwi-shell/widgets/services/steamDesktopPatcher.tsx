@@ -1,6 +1,7 @@
 import GLib from "gi://GLib"
 import Gio from "gi://Gio"
-import { logDebug } from "../../debug"
+import { logger } from "../../log"
+const log = logger("steam-patcher")
 
 const APPLICATIONS_DIR = `${GLib.get_home_dir()}/.local/share/applications`
 const RUNGAMEID_REGEX = /Exec=steam steam:\/\/rungameid\/(\d+)/
@@ -13,7 +14,7 @@ function patchDesktopFile(path: string): void {
         const [, bytes] = file.load_contents(null)
         contents = new TextDecoder().decode(bytes)
     } catch (e) {
-        console.error(`[SteamPatcher] Failed to read ${path}:`, e)
+        log.error(`[SteamPatcher] Failed to read ${path}:`, e)
         return
     }
 
@@ -31,7 +32,7 @@ function patchDesktopFile(path: string): void {
     )
 
     if (patched === contents) {
-        console.warn(`[SteamPatcher] Could not find [Desktop Entry] in ${path}`)
+        log.warn(`[SteamPatcher] Could not find [Desktop Entry] in ${path}`)
         return
     }
 
@@ -43,9 +44,9 @@ function patchDesktopFile(path: string): void {
             Gio.FileCreateFlags.REPLACE_DESTINATION,
             null,
         )
-        console.log(`[SteamPatcher] Patched ${path} → StartupWMClass=${wmClass}`)
+        log.info(`[SteamPatcher] Patched ${path} → StartupWMClass=${wmClass}`)
     } catch (e) {
-        console.error(`[SteamPatcher] Failed to write ${path}:`, e)
+        log.error(`[SteamPatcher] Failed to write ${path}:`, e)
     }
 }
 
@@ -86,12 +87,12 @@ export default function steamDesktopPatcher(): void {
             }
         }
     } catch (e) {
-        console.warn("[SteamPatcher] Could not enumerate applications dir:", e)
+        log.warn("[SteamPatcher] Could not enumerate applications dir:", e)
     }
 
     const monitor = dir.monitor_directory(Gio.FileMonitorFlags.NONE, null)
     monitor.connect("changed", handleFileEvent)
     ;(globalThis as any).__steamDesktopMonitor = monitor
 
-    logDebug("[SteamPatcher] Watching", APPLICATIONS_DIR)
+    log.debug("[SteamPatcher] Watching", APPLICATIONS_DIR)
 }

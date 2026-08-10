@@ -13,9 +13,12 @@ import NotificationCenter, {
   toggleNc,
 } from "./widgets/Notifications/NotificationCenter"
 import { handleCliRequest } from "./cli"
+import { logger } from "./log"
 
 import steamDesktopPatcher from "./widgets/services/steamDesktopPatcher";
 import nightShiftService from "./widgets/services/nightShiftSchedule"
+
+logger("kiwi").info("kiwi-shell starting")
 
 app.start({
   requestHandler(argv: string[], response: (response: string) => void) {

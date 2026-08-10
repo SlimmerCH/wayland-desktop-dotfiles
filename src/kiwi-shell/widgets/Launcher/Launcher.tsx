@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("launcher")
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, For, Accessor } from "ags"
@@ -48,9 +50,6 @@ const results = createComputed(get => {
 const SUPER_MODMASK = 64
 
 async function registerLauncherBind() {
-    // (the super+space cleanup for pre-tap-to-launch kiwi versions is gone:
-    // those were dynamic keyword binds, and no keyword bind can survive into
-    // a lua-config compositor)
     let haveToggle = false
     try {
         const binds = JSON.parse(await execAsync(["hyprctl", "binds", "-j"]))
@@ -60,19 +59,23 @@ async function registerLauncherBind() {
             b.key === "SUPER_L" && b.modmask === SUPER_MODMASK &&
             b.submap === "" && !isKiwiBind(b))
         if (foreign) {
-            console.warn("Launcher: foreign bind on plain super found, leaving keybinds alone:",
+            log.warn("foreign bind on plain super found, leaving keybinds alone:",
                 describeBind(foreign))
             return
         }
         haveToggle = binds.some((b: any) => b.description === "kiwi: launcher toggle")
     } catch (e) {
-        console.error("Launcher: failed to query binds, skipping setup:", e)
+        log.error("failed to query binds, skipping setup:", e)
         return
     }
-    if (haveToggle) return
+    if (haveToggle) {
+        log.debug("super-tap bind already in place")
+        return
+    }
 
-    evalLua(luaBind("SUPER + SUPER_L", `hl.dsp.exec_cmd("kiwictl launcher toggle")`,
-        "kiwi: launcher toggle", { release: true }), "launcher bind")
+    if (await evalLua(luaBind("SUPER + SUPER_L", `hl.dsp.exec_cmd("kiwictl launcher toggle")`,
+        "kiwi: launcher toggle", { release: true }), "launcher bind"))
+        log.info("registered super-tap launcher bind")
 }
 
 registerLauncherBind()

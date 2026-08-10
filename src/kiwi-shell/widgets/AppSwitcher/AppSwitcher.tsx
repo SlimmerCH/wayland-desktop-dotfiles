@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("appswitcher")
 import app from "ags/gtk4/app"
 import { Astal, Gtk, Gdk } from "ags/gtk4"
 import { createState, createComputed, createEffect, For, createBinding } from "ags"
@@ -30,21 +32,11 @@ hyprland.connect("notify::focused-client", () => {
 })
 
 // ─── Alt+Tab keybinds ─────────────────────────────────────────────────────────
-// Registers the whole alt-tab submap dynamically so users get working binds
-// out of the box (docs/AppSwitcherKeybinds.md stays the manual route). If a
-// foreign ALT+TAB or ALT+ALT_L bind exists in the root submap — the user's
-// own alt-tab — we leave the keyboard alone. Kiwi's own binds (identified by
-// their "kiwi:" description — the lua config reports every bind's dispatcher
-// as "__lua", so descriptions are the only identity introspection has left)
-// are unbound and re-registered, so fixes to the scheme reach existing
-// setups. Dynamic lua binds are wiped on config reload, so this re-runs on
-// config-reloaded.
-//
-// The ALT_L release binds MUST live in the root submap: Hyprland matches a
-// bind against the submap that was active when the key was PRESSED
-// (submapAtPress), and Alt goes down before the submap is entered. The
-// shell-side isVisible guard makes the confirm exec a no-op for all the
-// ordinary Alt releases this fires on.
+// Registered on startup and after every config reload (reloads wipe dynamic
+// binds). A foreign ALT+TAB / ALT+ALT_L root bind means the user has their
+// own alt-tab — leave the keyboard alone. The ALT_L release binds must live
+// in the root submap: a bind matches the submap active at key PRESS, and Alt
+// goes down before the submap is entered (isVisible no-ops the stray fires).
 
 const ALT_MODMASK = 8
 
@@ -55,20 +47,18 @@ async function registerAltTabBinds() {
             (b.key === "TAB" || b.key === "ALT_L") &&
             b.modmask === ALT_MODMASK && b.submap === "" && !isKiwiBind(b))
         if (foreign) {
-            console.warn("AppSwitcher: foreign alt-tab bind found, leaving keybinds alone:",
+            log.warn("foreign alt-tab bind found, leaving keybinds alone:",
                 describeBind(foreign))
             return
         }
     } catch (e) {
-        console.error("AppSwitcher: failed to query binds, skipping alt-tab setup:", e)
+        log.error("failed to query binds, skipping alt-tab setup:", e)
         return
     }
 
-    // one eval chunk: executes atomically and in order (the --batch of the
-    // lua world). hl.unbind clears every bind on the combo and tolerates
-    // absence; define_submap APPENDS on redefinition, hence the unbinds
-    // inside it first.
-    evalLua([
+    // one eval chunk = atomic and ordered. define_submap appends on
+    // redefinition, hence the unbinds inside it first.
+    const ok = await evalLua([
         // clear any previous incarnation of the scheme first
         luaUnbind("ALT + TAB"),
         luaUnbind("ALT + ALT_L"),
@@ -94,6 +84,7 @@ async function registerAltTabBinds() {
         `  ${luaBind("ALT + escape", `hl.dsp.submap("reset")`, "kiwi: apps submap reset", { release: true })}`,
         `end)`,
     ].join("\n"), "alt-tab binds")
+    if (ok) log.info("registered alt-tab binds (root + app_switcher submap)")
 }
 
 registerAltTabBinds()

@@ -2,7 +2,8 @@ import Gio from "gi://Gio"
 import GioUnix from "gi://GioUnix"
 import GLib from "gi://GLib"
 import { createState } from "ags"
-import { logDebug } from "../debug"
+import { logger } from "../log"
+const log = logger("desktop-entries")
 
 export const classToEntry = new Map<string, string>()
 export const entryToClass = new Map<string, string>()
@@ -38,19 +39,19 @@ export function buildClassMap() {
             try {
                 titleMatchers.push({ entry: id, regex: new RegExp(titleMatchRaw, "i") })
             } catch (e) {
-                console.error(`[ClassMap] Invalid X-Kiwi-TitleMatch in ${id}: ${titleMatchRaw}`, e)
+                log.error(`[ClassMap] Invalid X-Kiwi-TitleMatch in ${id}: ${titleMatchRaw}`, e)
             }
         }
     }
 
-    logDebug(`[ClassMap] Built ${classToEntry.size} class entries, ${titleMatchers.length} title matchers`)
+    log.debug(`[ClassMap] Built ${classToEntry.size} class entries, ${titleMatchers.length} title matchers`)
     setMapVersion(v => v + 1)
 }
 
 function watchDir(path: string) {
     const dir = Gio.File.new_for_path(path)
     if (!dir.query_exists(null)) {
-        logDebug(`[ClassMap] Skipping (does not exist): ${path}`)
+        log.debug(`[ClassMap] Skipping (does not exist): ${path}`)
         return
     }
 
@@ -61,7 +62,7 @@ function watchDir(path: string) {
             eventType !== Gio.FileMonitorEvent.CHANGED &&
             eventType !== Gio.FileMonitorEvent.DELETED
         ) return
-        logDebug(`[ClassMap] Detected change in ${path}, rebuilding...`)
+        log.debug(`[ClassMap] Detected change in ${path}, rebuilding...`)
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
             buildClassMap()
             return GLib.SOURCE_REMOVE
@@ -71,7 +72,7 @@ function watchDir(path: string) {
     ;(globalThis as any).__classMapMonitors ??= []
     ;(globalThis as any).__classMapMonitors.push(monitor)
 
-    logDebug(`[ClassMap] Watching ${path}`)
+    log.debug(`[ClassMap] Watching ${path}`)
 }
 
 const dataDirs = [

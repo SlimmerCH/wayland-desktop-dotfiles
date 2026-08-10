@@ -1,3 +1,5 @@
+import { logger } from "../../log"
+const log = logger("dock")
 import { conf } from "../config"
 import GLib from "gi://GLib"
 import { Icon } from "../iconNames"
@@ -37,7 +39,7 @@ export function emptyTrash() {
     try {
         GLib.spawn_command_line_async("gio trash --empty")
     } catch (error) {
-        console.error("Failed to empty trash:", error)
+        log.error("Failed to empty trash:", error)
     }
 }
 
