@@ -63,7 +63,15 @@ export function startBluetoothDiscovery() {
 }
 
 export function stopBluetoothDiscovery() {
-  adapter?.stop_discovery()
+  try {
+    adapter?.stop_discovery()
+  } catch (e) {
+    // bluez throws "No discovery started" when nothing is scanning. This is
+    // routine, not an error: pairDevice() stops discovery and then calls
+    // connectDevice(), which stops it again. Letting that throw used to abort
+    // connectDevice() *before* connect_device() ran, so a successful pair never
+    // connected and discovery was left stopped (the finally never ran either).
+  }
 }
 
 export default function BluetoothTab({ visible }) {
@@ -156,7 +164,12 @@ function Device({ device, paired }) {
 
   const hasIcon = iconBinding.as((s) => !!s)
 
-  const menu = DeviceContextMenu(device, connectedBinding, pairedBinding)
+  const menu = DeviceContextMenu(
+    device,
+    connectedBinding,
+    pairedBinding,
+    trustedBinding,
+  )
 
   return (
     <button
@@ -194,7 +207,12 @@ function Device({ device, paired }) {
   )
 }
 
-function DeviceContextMenu(device, connectedBinding, pairedBinding) {
+function DeviceContextMenu(
+  device,
+  connectedBinding,
+  pairedBinding,
+  trustedBinding,
+) {
   let popover: Gtk.Popover
 
   const item = (label: string, icon: string, onClicked: () => void, visible) => (
@@ -227,8 +245,13 @@ function DeviceContextMenu(device, connectedBinding, pairedBinding) {
           pairedBinding.as((p) => !p))}
         {item("Disconnect", "bluetooth-disabled-symbolic", () => disconnectDevice(device),
           connectedBinding)}
+        {/* Mirrors the "known device" test in Device(): a bond-drop relic (e.g.
+            AirPods that refused re-keying) has paired=no but trusted=yes, and it
+            still holds a bluez registry entry that remove_device() can clear.
+            Gating on paired alone left exactly those devices — the ones you most
+            need to forget — with no Forget item. */}
         {item("Forget Device", "user-trash-symbolic", () => forgetDevice(device),
-          pairedBinding)}
+          createComputed((get) => get(pairedBinding) || get(trustedBinding)))}
       </box>
     </popover>
   )
